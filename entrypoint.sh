@@ -1,0 +1,54 @@
+#!/bin/bash
+set -e
+
+# Handle APP_KEY persistence in the database volume
+KEY_FILE="/var/www/html/database/.app_key"
+
+if [ -z "$APP_KEY" ]; then
+    if [ -f "$KEY_FILE" ]; then
+        echo "Loading persisted APP_KEY from $KEY_FILE"
+        export APP_KEY=$(cat "$KEY_FILE")
+    else
+        echo "Generating new APP_KEY..."
+        # Generate key and capture only the key part (base64:...)
+        NEW_KEY=$(php artisan key:generate --show --no-ansi)
+        echo "$NEW_KEY" > "$KEY_FILE"
+        export APP_KEY="$NEW_KEY"
+        echo "New APP_KEY generated and persisted to $KEY_FILE"
+    fi
+fi
+
+# Ensure SQLite database exists in the persistent volume
+if [ ! -f /var/www/html/database/database.sqlite ]; then
+    echo "Creating initial database..."
+    touch /var/www/html/database/database.sqlite
+    chown www-data:www-data /var/www/html/database/database.sqlite
+    
+    # Run migrations and seed for the first time
+    echo "Running initial migrations and seeding..."
+    php artisan migrate --force
+    php artisan db:seed --force
+else
+    # Just run migrations for updates
+    echo "Running migrations..."
+    php artisan migrate --force
+fi
+
+# Install acme.sh if missing in the volume
+if [ ! -f /acme/acme.sh ]; then
+    echo "Installing acme.sh to /acme..."
+    if [ -d "/var/www/html/storage/app/acme_src" ]; then
+        cd /var/www/html/storage/app/acme_src
+        ./acme.sh --install --force --home /acme --config-home /acme/config --cert-home /acme/certs
+        cd /var/www/html
+    else
+        echo "Warning: acme_src not found, skipping acme.sh install"
+    fi
+fi
+
+# Ensure storage is writable
+chown -R www-data:www-data /var/www/html/storage /var/www/html/database /acme
+
+# Start the main process
+echo "Starting Apache..."
+exec "$@"

@@ -1,0 +1,47 @@
+
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Origin Error</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            position: relative;
+        }
+        h1 {
+            color: #5ca731;
+            text-align: left;
+            margin-left: 20px;
+        }
+        .error-info {
+            text-align: left;
+            margin-left: 20px;
+        }
+        .error-info p:first-child {
+            margin-bottom: 75px;
+        }
+        footer {
+            position: absolute;
+            bottom: 10px;
+            color: #777;
+        }
+    </style>
+</head>
+<body>
+    <h1>Origin Unreachable</h1>
+    <div class="error-info">
+        <p>Sorry, we are unable to reach the origin server at the moment. Please try again later.</p>
+        <p><strong>Error ID</strong>: 9c217820-844c-4026-9e8e-98d0dd1dcdf9</p>
+        <p><strong>Timestamp</strong>: 2026-02-24 04:41:54</p>
+        
+    </div>
+    <footer>Powered by Ezoic</footer>
+</body>
+</html>

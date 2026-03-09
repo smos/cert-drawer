@@ -1,0 +1,22 @@
+# Docker Ignore
+.git
+.env
+vendor
+node_modules
+npm-debug.log
+storage/app/private/certificates/*
+storage/app/acme/*
+storage/framework/cache/data/*
+storage/framework/sessions/*
+storage/framework/views/*
+storage/logs/*
+database/database.sqlite
+database/database.sqlite-journal
+tests
+.phpunit.result.cache
+.editorconfig
+README.md
+Dockerfile
+docker-compose.yml
+docker-compose.override.yml
+.dockerignore

@@ -1,0 +1,28 @@
+services:
+  certkast:
+    build: .
+    container_name: cert-drawer
+    ports:
+      - "8080:80"
+    volumes:
+      - cert-data:/var/www/html/storage/app/private/certificates
+      - db-data:/var/www/html/database
+      - acme-data:/acme
+    environment:
+      - APP_ENV=production
+      - APP_DEBUG=false
+      - DB_CONNECTION=sqlite
+      - ACME_HOME=/acme
+      - ACME_CERTS=/acme/certs
+      - ACME_BINARY=/acme/acme.sh
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/login"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  cert-data:
+  db-data:
+  acme-data:
