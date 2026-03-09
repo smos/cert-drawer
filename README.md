@@ -4,6 +4,12 @@ It is written almost entirely using gemini-cli where most time spent is in testi
 
 There is a mass import option available via the CLI, but the web front end supports adding a domain manually and uploading seperate files as well as importing a PFX file.
 
+Domain List
+![alt text](screenshots/domainlist.png?raw=true "Domain List")
+
+Certificate Details
+![alt text](screenshots/certificatedetails.png?raw=true "Certificate Details")
+
 # Design Goals (working)
 - searchable index by name, tags, thumbprints
 - Lists Domains and Authorities
