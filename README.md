@@ -7,6 +7,8 @@ There is a mass import option available via the CLI, but the web front end suppo
 # Design Goals (working)
 - searchable index by name, tags, thumbprints
 - Lists Domains and Authorities
+- Add Tags for either private key or public keys
+- Notes field to leave things like 3rd party contact information, owners
 - No local storage of private keys, PFX password gated
 - Expiry information configurable
 - CSR Default DNS template based on common information
