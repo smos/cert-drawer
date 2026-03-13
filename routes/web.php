@@ -37,6 +37,7 @@ Route::middleware('auth')->group(function () {
 
     Route::match(['get', 'post'], '/certificates/{certificate}/download/{type}', [CertificateController::class, 'download'])->name('certificates.download');
     Route::match(['get', 'post'], '/certificates/{certificate}/pfx', [CertificateController::class, 'generatePfx'])->name('certificates.pfx');
+    Route::post('/certificates/{certificate}/legacy-pfx', [CertificateController::class, 'generateLegacyPfx'])->name('certificates.legacy-pfx');
     Route::post('/certificates/{certificate}/upload', [CertificateController::class, 'upload'])->name('certificates.upload');
 
     Route::get('/settings', [SettingController::class, 'index'])->name('settings.index');

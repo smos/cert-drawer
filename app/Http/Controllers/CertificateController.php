@@ -306,6 +306,39 @@ class CertificateController extends Controller
         }
     }
 
+    public function generateLegacyPfx(Request $request, Certificate $certificate)
+    {
+        $this->authorizeAccess($certificate->domain);
+
+        if (!$request->isMethod('post')) {
+            abort(405, 'Method Not Allowed. Please use POST to transmit sensitive data.');
+        }
+        $password = $request->input('password');
+
+        if (!$password) {
+            return response()->json(['error' => 'Password required'], 400);
+        }
+
+        try {
+            $pfxData = $this->certService->generateLegacyPfx(
+                $certificate->certificate,
+                decrypt($certificate->private_key),
+                $password
+            );
+
+            $certificate->update(['pfx_password' => encrypt($password)]);
+            
+            AuditLog::log('pfx_legacy_generate', "Generated Legacy PFX for domain: {$certificate->domain->name}");
+
+            return response($pfxData)
+                ->header('Content-Type', 'application/x-pkcs12')
+                ->header('Content-Disposition', 'attachment; filename="' . $certificate->domain->name . '-legacy.pfx"');
+
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 400);
+        }
+    }
+
     public function upload(Request $request, Certificate $certificate)
     {
         $this->authorizeAccess($certificate->domain);

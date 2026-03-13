@@ -458,7 +458,8 @@
                                     ${c.certificate ? `
                                         <a href="/certificates/${c.id}/download/cert" class="btn btn-sm">Download Cert</a>
                                         ${c.pfx_password ? 
-                                            `<button class="btn btn-sm" onclick="downloadPfx(${c.id})">Download PFX</button>` : 
+                                            `<button class="btn btn-sm" onclick="downloadPfx(${c.id})">Download PFX</button>
+                                             <button class="btn btn-sm" onclick="downloadLegacyPfx(${c.id})" style="background:#e67e22; color:white;">Legacy PFX</button>` : 
                                             `<button class="btn btn-sm" onclick="promptPfx(${c.id})">Generate PFX</button>`
                                         }
                                         ${c.private_key ? `<button class="btn btn-sm" onclick="downloadKey(${c.id})">Download Key</button>` : ''}
@@ -932,6 +933,16 @@
             const pwd = await passwordPrompt("Enter PFX Password to verify and download:");
             if (pwd) {
                 downloadViaPost(`/certificates/${certId}/pfx`, { password: pwd });
+            }
+        }
+
+        async function downloadLegacyPfx(certId) {
+            if (!confirm("Are you sure you want to generate a legacy PFX? This uses old encryption algorithms (3DES/SHA1) and should only be used for old applications.")) {
+                return;
+            }
+            const pwd = await passwordPrompt("Enter PFX Password to verify and download legacy PFX:");
+            if (pwd) {
+                downloadViaPost(`/certificates/${certId}/legacy-pfx`, { password: pwd });
             }
         }
 

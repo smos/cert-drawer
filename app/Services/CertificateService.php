@@ -244,6 +244,35 @@ subjectAltName = @alt_names
         throw new Exception("Failed to generate PFX: " . openssl_error_string());
     }
 
+    public function generateLegacyPfx(string $cert, string $privateKey, string $password, array $chain = [])
+    {
+        $tmpCert = tempnam(sys_get_temp_dir(), 'cert_');
+        $tmpKey = tempnam(sys_get_temp_dir(), 'key_');
+        $tmpPfx = tempnam(sys_get_temp_dir(), 'pfx_');
+        
+        file_put_contents($tmpCert, $cert . "\n" . implode("\n", $chain));
+        file_put_contents($tmpKey, $privateKey);
+        
+        // -macalg sha1 -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES
+        $cmd = "openssl pkcs12 -export -out " . escapeshellarg($tmpPfx) . " -inkey " . escapeshellarg($tmpKey) . " -in " . escapeshellarg($tmpCert) . " -passout pass:" . escapeshellarg($password) . " -macalg sha1 -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES 2>&1";
+        
+        $output = shell_exec($cmd);
+        
+        if (file_exists($tmpPfx) && filesize($tmpPfx) > 0) {
+            $pfxData = file_get_contents($tmpPfx);
+            unlink($tmpCert);
+            unlink($tmpKey);
+            unlink($tmpPfx);
+            return $pfxData;
+        }
+        
+        unlink($tmpCert);
+        unlink($tmpKey);
+        if (file_exists($tmpPfx)) unlink($tmpPfx);
+        
+        throw new Exception("Failed to generate Legacy PFX: " . $output);
+    }
+
     public function parsePfx(string $pfxData, string $password)
     {
         // Try native first
