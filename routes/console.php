@@ -9,7 +9,14 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-$interval = (int) (Setting::where('key', 'dns_check_interval')->value('value') ?? 1);
+$interval = 1;
+try {
+    if (Illuminate\Support\Facades\Schema::hasTable('settings')) {
+        $interval = (int) (Setting::where('key', 'dns_check_interval')->value('value') ?? 1);
+    }
+} catch (\Exception $e) {
+    // Use default if DB is not ready
+}
 
 Schedule::call(function () {
     Setting::updateOrCreate(['key' => 'scheduler_last_run'], ['value' => now()->toDateTimeString()]);

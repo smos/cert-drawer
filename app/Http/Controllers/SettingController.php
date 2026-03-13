@@ -67,7 +67,10 @@ class SettingController extends Controller
                 if ($value === '********') continue;
                 if (empty($value) && Setting::where('key', $key)->exists()) continue;
             }
-            Setting::updateOrCreate(['key' => $key], ['value' => $value]);
+            
+            // Handle array to string conversion safely
+            $storeValue = is_array($value) ? json_encode($value) : $value;
+            Setting::updateOrCreate(['key' => $key], ['value' => $storeValue]);
         }
 
         AuditLog::log('settings_update', "Updated general application settings");
