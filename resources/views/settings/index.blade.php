@@ -89,6 +89,20 @@
         </div>
     </div>
 
+    <hr>
+    <h3>DNS Monitoring</h3>
+    <div style="margin-bottom:15px">
+        <label>DNS Monitor Resolver</label><br>
+        <input type="text" name="dns_resolver" value="{{ $settings['dns_resolver'] ?? '8.8.8.8' }}" placeholder="8.8.8.8" style="width:100%; padding:8px; border:1px solid #ddd;">
+        <small style="color: #666;">IP address of the DNS resolver to use for monitoring (e.g., 8.8.8.8, 1.1.1.1, or internal resolver).</small>
+    </div>
+
+    <div style="margin-bottom:15px">
+        <label>DNS Check Interval (Hours)</label><br>
+        <input type="number" name="dns_check_interval" value="{{ $settings['dns_check_interval'] ?? '1' }}" min="1" max="24" style="width:100%; padding:8px; border:1px solid #ddd;">
+        <small style="color: #666;">Minimum time between automated DNS checks (Recommended: 1 to 24 hours).</small>
+    </div>
+
     <button type="submit" class="btn btn-primary" style="margin-top: 20px;">Save General Settings</button>
 </form>
 @endsection

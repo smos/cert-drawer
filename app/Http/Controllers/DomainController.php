@@ -41,10 +41,24 @@ class DomainController extends Controller
         $user = Auth::user();
         $showDisabled = $request->boolean('show_disabled', false);
 
-        // Show domains that have at least one end-entity (non-CA) certificate
-        $query = Domain::whereHas('certificates', function($q) use ($isCa) {
-            $q->where('is_ca', $isCa);
-        })->with(['tags', 'certificates' => function($q) use ($isCa) {
+        $query = Domain::query();
+
+        if ($isCa) {
+            // In CA view, only show domains that HAVE at least one CA certificate
+            $query->whereHas('certificates', function($q) {
+                $q->where('is_ca', true);
+            });
+        } else {
+            // In normal view, show domains that have NO CA certificates 
+            // OR have no certificates at all (new domains)
+            $query->where(function($q) {
+                $q->whereDoesntHave('certificates', function($sq) {
+                    $sq->where('is_ca', true);
+                })->orWhereDoesntHave('certificates');
+            });
+        }
+
+        $query->with(['tags', 'certificates' => function($q) use ($isCa) {
             $q->where('is_ca', $isCa)->where('status', 'issued')->whereNotNull('expiry_date')->orderByDesc('expiry_date');
         }]);
 
@@ -130,7 +144,12 @@ class DomainController extends Controller
         $validated = $request->validate([
             'name' => 'required|unique:domains,name',
             'notes' => 'nullable|string',
+            'dns_monitored' => 'nullable|boolean',
         ]);
+
+        if (!isset($validated['dns_monitored'])) {
+            $validated['dns_monitored'] = !str_starts_with($validated['name'], '*.');
+        }
 
         $domain = Domain::create($validated);
         AuditLog::log('domain_create', "Added new domain: {$domain->name}");
@@ -159,11 +178,13 @@ class DomainController extends Controller
         $globalAllowedGroups = json_decode($settings['ldap_allowed_groups'] ?? '[]', true);
         
         $isAdmin = empty(Auth::user()->guid) || Auth::user()->canAccessDomainManagement();
+        $isCaDomain = $domain->certificates->where('is_ca', true)->count() > 0;
 
         return response()->json([
             'domain' => $domain,
             'global_groups' => $globalAllowedGroups,
-            'is_admin' => $isAdmin
+            'is_admin' => $isAdmin,
+            'is_ca_domain' => $isCaDomain
         ]);
     }
 
@@ -332,6 +353,21 @@ class DomainController extends Controller
         AuditLog::log('domain_toggle_status', "Domain {$domain->name} was {$status}");
 
         return response()->json(['success' => true, 'is_enabled' => $domain->is_enabled]);
+    }
+
+    public function toggleDnsMonitoring(Domain $domain)
+    {
+        $this->authorizeAccess($domain);
+
+        if (str_starts_with($domain->name, '*.')) {
+            return response()->json(['success' => false, 'message' => 'DNS monitoring is not available for wildcard domains.'], 400);
+        }
+
+        $domain->update(['dns_monitored' => !$domain->dns_monitored]);
+        $status = $domain->dns_monitored ? 'enabled' : 'disabled';
+        AuditLog::log('domain_toggle_dns', "DNS monitoring for {$domain->name} was {$status}");
+
+        return response()->json(['success' => true, 'dns_monitored' => $domain->dns_monitored]);
     }
 
     public function destroy(Domain $domain)

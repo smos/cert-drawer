@@ -51,38 +51,78 @@ class User extends Authenticatable implements LdapAuthenticatable
     }
 
     /**
+     * Get the LDAP groups for the user (cached for the request).
+     */
+    protected function getUserLdapGroups(): array
+    {
+        return \Cache::remember('user_groups_' . $this->id, 60, function () {
+            try {
+                $ldapUser = \App\Models\LdapUser::where('mail', $this->email)
+                    ->orWhere('userprincipalname', $this->email)
+                    ->first();
+                
+                if (!$ldapUser) return [];
+                
+                $memberOf = $ldapUser->getAttribute('memberof') ?: [];
+                return array_map('strtolower', $memberOf);
+            } catch (\Exception $e) {
+                \Log::error("LDAP group fetch failed for user {$this->email}: " . $e->getMessage());
+                return [];
+            }
+        });
+    }
+
+    /**
+     * Check if user is member of groups specified by a setting key.
+     */
+    protected function checkGroupMembership(string $settingKey, ?array $fallbackGroups = null): bool
+    {
+        $groupsStr = \App\Models\Setting::where('key', $settingKey)->value('value') ?? '';
+        
+        // Try to decode as JSON array
+        $groups = json_decode($groupsStr, true);
+        
+        // Fallback to semicolon-separated string if not a JSON array
+        if (!is_array($groups)) {
+            $groups = array_filter(explode(';', strtolower($groupsStr)));
+        } else {
+            $groups = array_map('strtolower', $groups);
+        }
+
+        if (empty($groups) && !is_null($fallbackGroups)) {
+            $groups = $fallbackGroups;
+        }
+
+        if (empty($groups)) return false;
+
+        $userGroups = $this->getUserLdapGroups();
+
+        foreach ($groups as $groupDn) {
+            if (in_array(strtolower($groupDn), $userGroups)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Check if user can access a domain based on group membership.
      */
     public function canAccess(Domain $domain): bool
     {
         // Local admins (no GUID) see everything
-        if (empty($this->guid)) {
-            return true;
-        }
+        if (empty($this->guid)) return true;
 
         // Global admins (delegated) see everything
-        if ($this->canAccessDomainManagement()) {
-            return true;
-        }
+        if ($this->canAccessDomainManagement()) return true;
 
         $allowedGroups = $domain->allowed_groups;
 
         // If no groups specified, everyone can see it
-        if (empty($allowedGroups)) {
-            return true;
-        }
+        if (empty($allowedGroups)) return true;
 
-        // Cache the LDAP groups for the duration of the request to avoid multiple LDAP calls
-        $userGroups = \Cache::remember('user_groups_' . $this->id, 60, function () {
-            $ldapUser = \App\Models\LdapUser::where('mail', $this->email)
-                ->orWhere('userprincipalname', $this->email)
-                ->first();
-            
-            if (!$ldapUser) return [];
-            
-            $memberOf = $ldapUser->getAttribute('memberof') ?: [];
-            return array_map('strtolower', $memberOf);
-        });
+        $userGroups = $this->getUserLdapGroups();
 
         foreach ($allowedGroups as $groupDn) {
             if (in_array(strtolower($groupDn), $userGroups)) {
@@ -94,39 +134,28 @@ class User extends Authenticatable implements LdapAuthenticatable
     }
 
     /**
-     * Check if user has management permissions (delegated admin).
+     * Check if user has management permissions (delegated admin / super admin).
      */
     public function canAccessDomainManagement(): bool
     {
         if (empty($this->guid)) return true;
 
-        $managementGroupsStr = \App\Models\Setting::where('key', 'admin_groups')->value('value') ?? '';
-        $managementGroups = array_filter(explode(';', strtolower($managementGroupsStr)));
+        return $this->checkGroupMembership('admin_groups', [
+            'cn=admins,ou=groups,dc=domain,dc=local'
+        ]);
+    }
 
-        if (empty($managementGroups)) {
-            // Fallback if not configured
-            $managementGroups = [
-                'cn=admins,ou=groups,dc=domain,dc=local',
-            ];
-        }
+    /**
+     * Check if user has access to a specific area (granular RBAC).
+     */
+    public function hasAccessTo(string $area): bool
+    {
+        if (empty($this->guid)) return true;
 
-        $userGroups = \Cache::remember('user_groups_' . $this->id, 60, function () {
-            $ldapUser = \App\Models\LdapUser::where('mail', $this->email)
-                ->orWhere('userprincipalname', $this->email)
-                ->first();
-            
-            if (!$ldapUser) return [];
-            
-            $memberOf = $ldapUser->getAttribute('memberof') ?: [];
-            return array_map('strtolower', $memberOf);
-        });
+        // Super admins always have access
+        if ($this->canAccessDomainManagement()) return true;
 
-        foreach ($managementGroups as $groupDn) {
-            if (in_array(strtolower($groupDn), $userGroups)) {
-                return true;
-            }
-        }
-
-        return false;
+        // Specific area check
+        return $this->checkGroupMembership('access_groups_' . $area);
     }
 }

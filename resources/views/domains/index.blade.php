@@ -36,6 +36,7 @@
     <a href="{{ route('domains.index', array_merge(request()->all(), ['status' => 'expiring'])) }}" class="tag" style="text-decoration: none; padding: 5px 12px; background: #f1c40f; color: #8a6d3b; {{ request('status') === 'expiring' ? 'border: 2px solid #333;' : '' }}">Expiring Soon</a>
     <a href="{{ route('domains.index', array_merge(request()->all(), ['status' => 'expired'])) }}" class="tag" style="text-decoration: none; padding: 5px 12px; background: #e74c3c; color: white; {{ request('status') === 'expired' ? 'border: 2px solid #333;' : '' }}">Expired</a>
     <a href="{{ route('domains.index', array_merge(request()->all(), ['status' => 'healthy'])) }}" class="tag" style="text-decoration: none; padding: 5px 12px; background: #2ecc71; color: white; {{ request('status') === 'healthy' ? 'border: 2px solid #333;' : '' }}">Healthy</a>
+    <a href="{{ route('domains.index', array_merge(request()->all(), ['status' => 'none'])) }}" class="tag" style="text-decoration: none; padding: 5px 12px; background: #95a5a6; color: white; {{ request('status') === 'none' ? 'border: 2px solid #333;' : '' }}">No Cert</a>
     
     <label style="margin-left: 20px; display: flex; align-items: center; gap: 5px; color: #666;">
         <input type="checkbox" onchange="window.location.href='{{ route('domains.index', array_merge(request()->all(), ['show_disabled' => request('show_disabled') ? 0 : 1])) }}'" {{ request('show_disabled') ? 'checked' : '' }}> Show Disabled
@@ -79,7 +80,13 @@
         @csrf
         <div style="margin-bottom:15px">
             <label>Domain Name / Wildcard</label><br>
-            <input type="text" name="name" required style="width:100%; padding:8px; border:1px solid #ddd;">
+            <input type="text" name="name" id="new-domain-name" required style="width:100%; padding:8px; border:1px solid #ddd;" oninput="checkWildcardDns(this.value)">
+        </div>
+        <div style="margin-bottom:15px">
+            <label>
+                <input type="hidden" name="dns_monitored" value="0">
+                <input type="checkbox" name="dns_monitored" id="new-domain-dns-monitored" value="1" checked> Monitor DNS Records
+            </label>
         </div>
         <div style="margin-bottom:15px">
             <label>Notes</label><br>
@@ -89,6 +96,23 @@
         <button type="button" class="btn" onclick="this.parentElement.parentElement.style.display='none'">Cancel</button>
     </form>
 </div>
+
+<script>
+    function checkWildcardDns(val) {
+        const checkbox = document.getElementById('new-domain-dns-monitored');
+        if (val.startsWith('*.')) {
+            checkbox.checked = false;
+            checkbox.disabled = true;
+        } else {
+            checkbox.disabled = false;
+            if (checkbox.hasAttribute('data-last-user-state')) {
+                // Restore user state if we have it
+            } else {
+                checkbox.checked = true;
+            }
+        }
+    }
+</script>
 
 <div id="import-cert-modal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:white; padding:30px; box-shadow:0 0 10px rgba(0,0,0,0.5); z-index:1001; border-radius:8px; width:400px;">
     <h3>Import Certificate File</h3>

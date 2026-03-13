@@ -176,10 +176,24 @@
         @auth
             <a href="{{ route('domains.index') }}">Domains</a>
             <a href="{{ route('domains.authorities') }}">Authorities</a>
-            <a href="{{ route('auth.settings.index') }}">Authentication</a>
-            <a href="{{ route('settings.index') }}">General Settings</a>
-            <a href="{{ route('automations.index') }}">Automations</a>
-            <a href="{{ route('audit.index') }}">Audit Logs</a>
+            @if(Auth::user()->hasAccessTo('auth'))
+                <a href="{{ route('auth.settings.index') }}">Authentication</a>
+            @endif
+            @if(Auth::user()->hasAccessTo('settings'))
+                <a href="{{ route('settings.index') }}">General Settings</a>
+            @endif
+            @if(Auth::user()->hasAccessTo('dns'))
+                <a href="{{ route('dns.health') }}">DNS Health</a>
+            @endif
+            @if(Auth::user()->hasAccessTo('cert_health'))
+                <a href="{{ route('cert-health.index') }}">Cert Health</a>
+            @endif
+            @if(Auth::user()->hasAccessTo('automations'))
+                <a href="{{ route('automations.index') }}">Automations</a>
+            @endif
+            @if(Auth::user()->hasAccessTo('audit'))
+                <a href="{{ route('audit.index') }}">Audit Logs</a>
+            @endif
             <div style="margin-top: auto; padding-top: 20px; border-top: 1px solid var(--secondary);">
                 <div style="font-size: 0.85rem; color: #888; margin-bottom: 10px;">Logged in as:</div>
                 <div style="font-weight: 600; margin-bottom: 15px;">{{ Auth::user()->name }}</div>
@@ -287,7 +301,7 @@
                 })
                 .then(data => {
                     try {
-                        renderDrawer(data.domain, data.global_groups, data.is_admin);
+                        renderDrawer(data.domain, data.global_groups, data.is_admin, data.is_ca_domain);
                         drawer.classList.add('open');
                         overlay.classList.add('active');
                     } catch (e) {
@@ -349,11 +363,24 @@
             });
         }
 
-        function renderDrawer(domain, globalGroups = [], isAdmin = false) {
+        function renderDrawer(domain, globalGroups = [], isAdmin = false, isCaDomain = false) {
             let html = `
                 <div style="display:flex; justify-content:space-between; align-items:center">
                     <h2 data-id="${domain.id}">${domain.name} ${domain.is_enabled ? '' : '<small style="color:#e74c3c">(Disabled)</small>'}</h2>
                     <div>
+                        ${(!domain.name.startsWith('*.') && !isCaDomain) ? `
+                        <button class="btn btn-sm" 
+                                style="background:${domain.dns_monitored ? '#27ae60' : '#7f8c8d'}; color:white;"
+                                onclick="toggleDnsMonitoring(${domain.id})">
+                            DNS Mon: ${domain.dns_monitored ? 'ON' : 'OFF'}
+                        </button>
+                        <button class="btn btn-sm" onclick="refreshDomainDns(${domain.id})" title="Check DNS records now">
+                            Refresh DNS
+                        </button>
+                        <button class="btn btn-sm" onclick="refreshDomainCertHealth(${domain.id})" title="Check Live TLS Certificate now">
+                            Live Cert
+                        </button>
+                        ` : ''}
                         <button class="btn btn-sm ${domain.is_enabled ? 'btn-danger' : 'btn-primary'}" 
                                 style="${domain.is_enabled ? 'background:#e74c3c; color:white;' : ''}"
                                 onclick="toggleDomainStatus(${domain.id})">
@@ -511,8 +538,82 @@
             .then(res => res.json())
             .then(data => {
                 const status = data.is_enabled ? 'enabled' : 'disabled';
-                alert(`Domain has been ${status}.`);
+                // Update global state and re-render
                 openDrawer(domainId);
+            });
+        }
+
+        function toggleDnsMonitoring(domainId) {
+            fetch(`/domains/${domainId}/toggle-dns-monitoring`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                }
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    openDrawer(domainId);
+                } else {
+                    alert(data.message);
+                }
+            });
+        }
+
+        function refreshDomainDns(domainId) {
+            const btn = event.target;
+            const originalText = btn.innerText;
+            btn.innerText = 'Checking...';
+            btn.disabled = true;
+
+            fetch(`/dns-health/${domainId}/check`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                }
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    // Refresh logs if we are on a page that shows them, 
+                    // or just re-open drawer to show updated 'last_dns_check' if we added it there
+                    openDrawer(domainId);
+                } else {
+                    alert(data.message);
+                }
+            })
+            .finally(() => {
+                btn.innerText = originalText;
+                btn.disabled = false;
+            });
+        }
+
+        function refreshDomainCertHealth(domainId) {
+            const btn = event.target;
+            const originalText = btn.innerText;
+            btn.innerText = 'Checking...';
+            btn.disabled = true;
+
+            fetch(`/cert-health/${domainId}/check`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                }
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    openDrawer(domainId);
+                } else {
+                    alert(data.message);
+                }
+            })
+            .finally(() => {
+                btn.innerText = originalText;
+                btn.disabled = false;
             });
         }
 

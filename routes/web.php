@@ -26,6 +26,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/domains/{domain}/groups', [DomainController::class, 'updateGroups'])->name('domains.groups.update');
     Route::post('/domains/{domain}/notes', [DomainController::class, 'updateNotes'])->name('domains.notes.update');
     Route::post('/domains/{domain}/toggle-status', [DomainController::class, 'toggleStatus'])->name('domains.toggle-status');
+    Route::post('/domains/{domain}/toggle-dns-monitoring', [DomainController::class, 'toggleDnsMonitoring'])->name('domains.toggle-dns-monitoring');
     Route::delete('/tags/{tag}', [DomainController::class, 'removeTag'])->name('tags.remove');
     Route::get('/domains/{domain}/preview-csr-config', [CertificateController::class, 'previewCsrConfig'])->name('domains.preview-csr-config');
     Route::post('/domains/{domain}/initiate-request', [CertificateController::class, 'initiateRequest'])->name('domains.initiate-request');
@@ -40,19 +41,40 @@ Route::middleware('auth')->group(function () {
     Route::post('/certificates/{certificate}/legacy-pfx', [CertificateController::class, 'generateLegacyPfx'])->name('certificates.legacy-pfx');
     Route::post('/certificates/{certificate}/upload', [CertificateController::class, 'upload'])->name('certificates.upload');
 
-    Route::get('/settings', [SettingController::class, 'index'])->name('settings.index');
-    Route::post('/settings', [SettingController::class, 'update'])->name('settings.update');
-    
-    Route::get('/settings/auth', [\App\Http\Controllers\AuthController::class, 'index'])->name('auth.settings.index');
-    Route::post('/settings/auth', [\App\Http\Controllers\AuthController::class, 'update'])->name('auth.settings.update');
-    Route::post('/settings/auth/test-ldap', [\App\Http\Controllers\AuthController::class, 'testLdap'])->name('auth.settings.test-ldap');
-    Route::get('/settings/auth/search-groups', [\App\Http\Controllers\AuthController::class, 'searchGroups'])->name('auth.settings.search-groups');
+    Route::middleware('admin:auth')->group(function () {
+        Route::get('/settings/auth', [\App\Http\Controllers\AuthController::class, 'index'])->name('auth.settings.index');
+        Route::post('/settings/auth', [\App\Http\Controllers\AuthController::class, 'update'])->name('auth.settings.update');
+        Route::post('/settings/auth/test-ldap', [\App\Http\Controllers\AuthController::class, 'testLdap'])->name('auth.settings.test-ldap');
+        Route::get('/settings/auth/search-groups', [\App\Http\Controllers\AuthController::class, 'searchGroups'])->name('auth.settings.search-groups');
+    });
 
-    Route::get('/settings/search-groups', [SettingController::class, 'searchGroups'])->name('settings.search-groups');
-    Route::get('/audit-logs', [\App\Http\Controllers\AuditLogController::class, 'index'])->name('audit.index');
+    Route::middleware('admin:settings')->group(function () {
+        Route::get('/settings', [SettingController::class, 'index'])->name('settings.index');
+        Route::post('/settings', [SettingController::class, 'update'])->name('settings.update');
+        Route::get('/settings/search-groups', [SettingController::class, 'searchGroups'])->name('settings.search-groups');
+    });
+
+    Route::middleware('admin:audit')->group(function () {
+        Route::get('/audit-logs', [\App\Http\Controllers\AuditLogController::class, 'index'])->name('audit.index');
+    });
     
-    Route::get('/automations', [\App\Http\Controllers\AutomationController::class, 'index'])->name('automations.index');
-    Route::post('/automations', [\App\Http\Controllers\AutomationController::class, 'store'])->name('automations.store');
-    Route::post('/automations/{automation}/run', [\App\Http\Controllers\AutomationController::class, 'run'])->name('automations.run');
-    Route::delete('/automations/{automation}', [\App\Http\Controllers\AutomationController::class, 'destroy'])->name('automations.destroy');
+    Route::middleware('admin:dns')->group(function () {
+        Route::get('/dns-health', [\App\Http\Controllers\DnsController::class, 'health'])->name('dns.health');
+        Route::post('/dns-health/check-all', [\App\Http\Controllers\DnsController::class, 'runGlobalCheck'])->name('dns.check-all');
+        Route::post('/dns-health/{domain}/check', [\App\Http\Controllers\DnsController::class, 'runDomainCheck'])->name('dns.check-domain');
+        Route::get('/dns-health/{domain}/logs', [\App\Http\Controllers\DnsController::class, 'showLogs'])->name('dns.domain-logs');
+    });
+
+    Route::middleware('admin:cert_health')->group(function () {
+        Route::get('/cert-health', [\App\Http\Controllers\CertHealthController::class, 'index'])->name('cert-health.index');
+        Route::post('/cert-health/check-all', [\App\Http\Controllers\CertHealthController::class, 'runCheck'])->name('cert-health.check-all');
+        Route::post('/cert-health/{domain}/check', [\App\Http\Controllers\CertHealthController::class, 'runDomainCheck'])->name('cert-health.check-domain');
+    });
+
+    Route::middleware('admin:automations')->group(function () {
+        Route::get('/automations', [\App\Http\Controllers\AutomationController::class, 'index'])->name('automations.index');
+        Route::post('/automations', [\App\Http\Controllers\AutomationController::class, 'store'])->name('automations.store');
+        Route::post('/automations/{automation}/run', [\App\Http\Controllers\AutomationController::class, 'run'])->name('automations.run');
+        Route::delete('/automations/{automation}', [\App\Http\Controllers\AutomationController::class, 'destroy'])->name('automations.destroy');
+    });
 });

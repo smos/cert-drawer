@@ -22,7 +22,23 @@ class AuthController extends Controller
             Setting::updateOrCreate(['key' => 'ldap_allowed_groups'], ['value' => json_encode($allowedGroups)]);
         }
 
-        foreach ($request->except(['_token', 'ldap_allowed_groups']) as $key => $value) {
+        // Handle the admin groups array specifically
+        if ($request->has('admin_groups')) {
+            $adminGroups = $request->input('admin_groups', []);
+            Setting::updateOrCreate(['key' => 'admin_groups'], ['value' => json_encode($adminGroups)]);
+        }
+
+        $granularAreas = ['auth', 'settings', 'automations', 'audit', 'dns', 'cert_health'];
+        foreach ($granularAreas as $area) {
+            $key = "access_groups_{$area}";
+            if ($request->has($key)) {
+                $groups = $request->input($key, []);
+                Setting::updateOrCreate(['key' => $key], ['value' => json_encode($groups)]);
+            }
+        }
+
+        $excludeFromGeneral = array_merge(['_token', 'ldap_allowed_groups', 'admin_groups'], array_map(fn($a) => "access_groups_{$a}", $granularAreas));
+        foreach ($request->except($excludeFromGeneral) as $key => $value) {
             if (in_array($key, ['ldap_password']) && ($value === '********' || empty($value))) {
                 if ($value === '********') continue;
                 if (empty($value) && Setting::where('key', $key)->exists()) continue;
