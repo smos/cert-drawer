@@ -7,6 +7,12 @@
     </div>
 @endif
 
+@if(session('error'))
+    <div style="background: #f8d7da; color: #721c24; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #f5c6cb;">
+        {{ session('error') }}
+    </div>
+@endif
+
 <h2>General Application Settings</h2>
 
 <form action="{{ route('settings.update') }}" method="POST" id="settings-form">
@@ -103,6 +109,77 @@
         <small style="color: #666;">Minimum time between automated DNS checks (Recommended: 1 to 24 hours).</small>
     </div>
 
+    <hr>
+    <h3>SMTP Settings</h3>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+        <div style="grid-column: span 2;">
+            <label>Mail Host</label><br>
+            <input type="text" name="mail_host" value="{{ $settings['mail_host'] ?? '' }}" placeholder="smtp.mailtrap.io" style="width:100%; padding:8px; border:1px solid #ddd;">
+        </div>
+        <div>
+            <label>Mail Port</label><br>
+            <input type="number" name="mail_port" value="{{ $settings['mail_port'] ?? '587' }}" style="width:100%; padding:8px; border:1px solid #ddd;">
+        </div>
+        <div>
+            <label>Mail Encryption</label><br>
+            <select name="mail_encryption" style="width:100%; padding:8px; border:1px solid #ddd;">
+                <option value="tls" {{ ($settings['mail_encryption'] ?? '') === 'tls' ? 'selected' : '' }}>TLS</option>
+                <option value="ssl" {{ ($settings['mail_encryption'] ?? '') === 'ssl' ? 'selected' : '' }}>SSL</option>
+                <option value="none" {{ ($settings['mail_encryption'] ?? '') === 'none' ? 'selected' : '' }}>None</option>
+            </select>
+        </div>
+        <div>
+            <label>Mail Username</label><br>
+            <input type="text" name="mail_username" value="{{ $settings['mail_username'] ?? '' }}" style="width:100%; padding:8px; border:1px solid #ddd;">
+        </div>
+        <div>
+            <label>Mail Password</label><br>
+            <input type="password" name="mail_password" value="{{ isset($settings['mail_password']) ? '********' : '' }}" style="width:100%; padding:8px; border:1px solid #ddd;">
+        </div>
+        <div>
+            <label>From Address</label><br>
+            <input type="email" name="mail_from_address" value="{{ $settings['mail_from_address'] ?? 'noreply@example.com' }}" style="width:100%; padding:8px; border:1px solid #ddd;">
+        </div>
+        <div>
+            <label>From Name</label><br>
+            <input type="text" name="mail_from_name" value="{{ $settings['mail_from_name'] ?? 'Cert Drawer' }}" style="width:100%; padding:8px; border:1px solid #ddd;">
+        </div>
+    </div>
+
+    <hr>
+    <h3>Email Notifications</h3>
+    <div style="margin-bottom:15px">
+        <label>DNS Health Recipients (Comma-separated)</label><br>
+        <input type="text" name="dns_mail_recipients" value="{{ $settings['dns_mail_recipients'] ?? '' }}" placeholder="admin@example.com, it@example.com" style="width:100%; padding:8px; border:1px solid #ddd;">
+    </div>
+    <div style="margin-bottom:15px">
+        <label>Cert Health Recipients (Comma-separated)</label><br>
+        <input type="text" name="cert_mail_recipients" value="{{ $settings['cert_mail_recipients'] ?? '' }}" placeholder="admin@example.com, it@example.com" style="width:100%; padding:8px; border:1px solid #ddd;">
+    </div>
+
+    <hr>
+    <h3>Test SMTP Settings</h3>
+    <div style="margin-bottom:15px; display: flex; gap: 10px; align-items: flex-end;">
+        <div style="flex: 1;">
+            <label>Test Recipient Email</label><br>
+            <input type="email" name="test_recipient" placeholder="test@example.com" style="width:100%; padding:8px; border:1px solid #ddd;">
+        </div>
+        <button type="button" onclick="sendTestEmail()" class="btn" style="background: #6c757d; color: white;">Send Test Email</button>
+    </div>
+
     <button type="submit" class="btn btn-primary" style="margin-top: 20px;">Save General Settings</button>
 </form>
+
+<script>
+    function sendTestEmail() {
+        const form = document.getElementById('settings-form');
+        const originalAction = form.action;
+        
+        // Temporarily change form action to the test-email route
+        form.action = "{{ route('settings.test-email') }}";
+        form.submit();
+        
+        // The page will reload anyway, so no need to reset action here.
+    }
+</script>
 @endsection

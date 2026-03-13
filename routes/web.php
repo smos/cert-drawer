@@ -5,7 +5,10 @@ use App\Http\Controllers\CertificateController;
 use App\Http\Controllers\SettingController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\SetupController;
+use App\Http\Controllers\HealthController;
 use Illuminate\Support\Facades\Route;
+
+Route::get('/health', [HealthController::class, 'check']);
 
 Route::get('/login', [LoginController::class, 'showLoginForm'])->name('login');
 Route::post('/login', [LoginController::class, 'login']);
@@ -51,6 +54,7 @@ Route::middleware('auth')->group(function () {
     Route::middleware('admin:settings')->group(function () {
         Route::get('/settings', [SettingController::class, 'index'])->name('settings.index');
         Route::post('/settings', [SettingController::class, 'update'])->name('settings.update');
+        Route::post('/settings/test-email', [SettingController::class, 'testEmail'])->name('settings.test-email');
         Route::get('/settings/search-groups', [SettingController::class, 'searchGroups'])->name('settings.search-groups');
     });
 

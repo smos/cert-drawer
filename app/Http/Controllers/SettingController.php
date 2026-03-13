@@ -6,12 +6,36 @@ use App\Models\Setting;
 use App\Models\AuditLog;
 use Illuminate\Http\Request;
 
+use App\Mail\TestMail;
+use Illuminate\Support\Facades\Mail;
+
 class SettingController extends Controller
 {
     public function index()
     {
         $settings = Setting::all()->pluck('value', 'key');
         return view('settings.index', compact('settings'));
+    }
+
+    public function testEmail(Request $request)
+    {
+        // Save settings first so the test uses what's on screen
+        $this->update($request);
+
+        $recipient = $request->input('test_recipient');
+        if (empty($recipient)) {
+            return back()->with('error', 'Please provide a test recipient email address.');
+        }
+
+        try {
+            // Re-trigger boot mail to ensure the latest saved settings are used in the current request
+            (new \App\Providers\AppServiceProvider(app()))->bootMailConfiguration();
+            
+            Mail::to($recipient)->send(new TestMail());
+            return back()->with('success', "Test email sent successfully to {$recipient}.");
+        } catch (\Exception $e) {
+            return back()->with('error', "Failed to send test email: " . $e->getMessage());
+        }
     }
 
     public function searchGroups(Request $request)
@@ -39,7 +63,7 @@ class SettingController extends Controller
     public function update(Request $request)
     {
         foreach ($request->except(['_token']) as $key => $value) {
-            if ($key === 'acme_hmac' && ($value === '********' || empty($value))) {
+            if (in_array($key, ['acme_hmac', 'mail_password']) && ($value === '********' || empty($value))) {
                 if ($value === '********') continue;
                 if (empty($value) && Setting::where('key', $key)->exists()) continue;
             }

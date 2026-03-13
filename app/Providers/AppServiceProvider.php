@@ -28,6 +28,38 @@ class AppServiceProvider extends ServiceProvider
         }
 
         $this->bootLdapConfiguration();
+        $this->bootMailConfiguration();
+    }
+
+    public function bootMailConfiguration(): void
+    {
+        try {
+            if (!Schema::hasTable('settings')) {
+                return;
+            }
+        } catch (\Exception $e) {
+            return;
+        }
+
+        $dbSettings = Setting::whereIn('key', [
+            'mail_host', 'mail_port', 'mail_username', 'mail_password', 'mail_encryption', 'mail_from_address', 'mail_from_name'
+        ])->get()->pluck('value', 'key');
+
+        if ($dbSettings->has('mail_host') && !empty($dbSettings['mail_host'])) {
+            Config::set('mail.default', 'smtp');
+            Config::set('mail.mailers.smtp.host', $dbSettings['mail_host']);
+            Config::set('mail.mailers.smtp.port', (int) ($dbSettings['mail_port'] ?? 587));
+            Config::set('mail.mailers.smtp.encryption', $dbSettings['mail_encryption'] ?? 'tls');
+            Config::set('mail.mailers.smtp.username', $dbSettings['mail_username'] ?? null);
+            Config::set('mail.mailers.smtp.password', $dbSettings['mail_password'] ?? null);
+            
+            Config::set('mail.mailers.smtp.verify_peer', false);
+            Config::set('mail.mailers.smtp.verify_peer_name', false);
+            Config::set('mail.mailers.smtp.allow_self_signed', true);
+            
+            Config::set('mail.from.address', $dbSettings['mail_from_address'] ?? 'noreply@example.com');
+            Config::set('mail.from.name', $dbSettings['mail_from_name'] ?? config('app.name'));
+        }
     }
 
     protected function bootLdapConfiguration(): void
