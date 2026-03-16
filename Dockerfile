@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y \
     unzip \
     git \
     curl \
+    dnsutils \
     openssl \
     && rm -rf /var/lib/apt/lists/*
 

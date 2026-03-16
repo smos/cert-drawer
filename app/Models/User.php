@@ -77,20 +77,24 @@ class User extends Authenticatable implements LdapAuthenticatable
      */
     protected function checkGroupMembership(string $settingKey, ?array $fallbackGroups = null): bool
     {
-        $groupsStr = \App\Models\Setting::where('key', $settingKey)->value('value') ?? '';
+        $groupsStr = \App\Models\Setting::where('key', $settingKey)->value('value');
         
-        // Try to decode as JSON array
-        $groups = json_decode($groupsStr, true);
-        
-        // Fallback to semicolon-separated string if not a JSON array
-        if (!is_array($groups)) {
-            $groups = array_filter(explode(';', strtolower($groupsStr)));
+        if (is_null($groupsStr) || $groupsStr === '') {
+            if (!is_null($fallbackGroups)) {
+                $groups = $fallbackGroups;
+            } else {
+                return false;
+            }
         } else {
-            $groups = array_map('strtolower', $groups);
-        }
-
-        if (empty($groups) && !is_null($fallbackGroups)) {
-            $groups = $fallbackGroups;
+            // Try to decode as JSON array
+            $groups = json_decode($groupsStr, true);
+            
+            // Fallback to semicolon-separated string if not a JSON array
+            if (!is_array($groups)) {
+                $groups = array_filter(explode(';', strtolower($groupsStr)));
+            } else {
+                $groups = array_map('strtolower', $groups);
+            }
         }
 
         if (empty($groups)) return false;

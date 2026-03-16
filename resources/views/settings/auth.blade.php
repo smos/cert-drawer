@@ -134,7 +134,7 @@
         </div>
 
         <div style="position: relative;">
-            <input type="text" class="group-search-input" data-target="access-{{ $area }}-selected" data-name="access_groups_{$area}[]" placeholder="Search groups for {{ $area }} access..." style="width:100%; padding:8px; border:1px solid #ddd; border-radius: 4px;">
+            <input type="text" class="group-search-input" data-target="access-{{ $area }}-selected" data-name="access_groups_{{ $area }}[]" placeholder="Search groups for {{ $area }} access..." style="width:100%; padding:8px; border:1px solid #ddd; border-radius: 4px;">
             <div class="group-results-container" style="display:none; position: absolute; top: 100%; left: 0; width: 100%; background: white; border: 1px solid #ddd; border-top: none; z-index: 100; box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-height: 200px; overflow-y: auto;"></div>
         </div>
     </div>
