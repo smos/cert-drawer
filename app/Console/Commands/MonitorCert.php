@@ -47,6 +47,7 @@ class MonitorCert extends Command
         $threshold = now()->subHours($interval);
 
         $domains = Domain::where('is_enabled', true)
+            ->where('cert_monitored', true)
             ->where('name', 'not like', '*.%')
             ->whereDoesntHave('certificates', function ($q) {
                 $q->where('is_ca', true);

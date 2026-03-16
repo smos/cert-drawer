@@ -12,6 +12,7 @@ class CertHealthController extends Controller
     public function index()
     {
         $domains = Domain::where('is_enabled', true)
+            ->where('cert_monitored', true)
             ->where('name', 'not like', '*.%')
             ->whereDoesntHave('certificates', function ($q) {
                 $q->where('is_ca', true);
@@ -45,6 +46,7 @@ class CertHealthController extends Controller
     public function runCheck(CertHealthService $certService)
     {
         $domains = Domain::where('is_enabled', true)
+            ->where('cert_monitored', true)
             ->where('name', 'not like', '*.%')
             ->whereDoesntHave('certificates', function ($q) {
                 $q->where('is_ca', true);

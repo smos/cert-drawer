@@ -89,6 +89,12 @@
             </label>
         </div>
         <div style="margin-bottom:15px">
+            <label>
+                <input type="hidden" name="cert_monitored" value="0">
+                <input type="checkbox" name="cert_monitored" id="new-domain-cert-monitored" value="1" checked> Monitor Certificate Health
+            </label>
+        </div>
+        <div style="margin-bottom:15px">
             <label>Notes</label><br>
             <textarea name="notes" style="width:100%; padding:8px; border:1px solid #ddd;"></textarea>
         </div>
@@ -99,17 +105,20 @@
 
 <script>
     function checkWildcardDns(val) {
-        const checkbox = document.getElementById('new-domain-dns-monitored');
+        const dnsCheckbox = document.getElementById('new-domain-dns-monitored');
+        const certCheckbox = document.getElementById('new-domain-cert-monitored');
+        
         if (val.startsWith('*.')) {
-            checkbox.checked = false;
-            checkbox.disabled = true;
+            dnsCheckbox.checked = false;
+            dnsCheckbox.disabled = true;
+            certCheckbox.checked = false;
+            certCheckbox.disabled = true;
         } else {
-            checkbox.disabled = false;
-            if (checkbox.hasAttribute('data-last-user-state')) {
-                // Restore user state if we have it
-            } else {
-                checkbox.checked = true;
-            }
+            dnsCheckbox.disabled = false;
+            certCheckbox.disabled = false;
+            // Defaults to checked for non-wildcard
+            dnsCheckbox.checked = true;
+            certCheckbox.checked = true;
         }
     }
 </script>

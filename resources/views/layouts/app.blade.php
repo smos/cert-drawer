@@ -107,8 +107,8 @@
         #drawer {
             position: fixed;
             top: 0;
-            right: -600px;
-            width: 500px;
+            right: -800px;
+            width: 700px;
             height: 100%;
             background: var(--white);
             box-shadow: -5px 0 15px rgba(0,0,0,0.1);
@@ -365,14 +365,22 @@
 
         function renderDrawer(domain, globalGroups = [], isAdmin = false, isCaDomain = false) {
             let html = `
-                <div style="display:flex; justify-content:space-between; align-items:center">
-                    <h2 data-id="${domain.id}">${domain.name} ${domain.is_enabled ? '' : '<small style="color:#e74c3c">(Disabled)</small>'}</h2>
-                    <div>
+                <div style="margin-bottom: 25px;">
+                    <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom: 10px;">
+                        <h2 data-id="${domain.id}" style="margin:0; overflow-wrap: break-word; word-break: break-word; max-width: 80%;">${domain.name} ${domain.is_enabled ? '' : '<small style="color:#e74c3c">(Disabled)</small>'}</h2>
+                        <button onclick="closeDrawer()" class="btn">Close</button>
+                    </div>
+                    <div style="display:flex; gap:5px; flex-wrap:wrap;">
                         ${(!domain.name.startsWith('*.') && !isCaDomain) ? `
                         <button class="btn btn-sm" 
                                 style="background:${domain.dns_monitored ? '#27ae60' : '#7f8c8d'}; color:white;"
                                 onclick="toggleDnsMonitoring(${domain.id})">
                             DNS Mon: ${domain.dns_monitored ? 'ON' : 'OFF'}
+                        </button>
+                        <button class="btn btn-sm" 
+                                style="background:${domain.cert_monitored ? '#27ae60' : '#7f8c8d'}; color:white;"
+                                onclick="toggleCertMonitoring(${domain.id})">
+                            Cert Mon: ${domain.cert_monitored ? 'ON' : 'OFF'}
                         </button>
                         <button class="btn btn-sm" onclick="refreshDomainDns(${domain.id})" title="Check DNS records now">
                             Refresh DNS
@@ -386,7 +394,6 @@
                                 onclick="toggleDomainStatus(${domain.id})">
                             ${domain.is_enabled ? 'Disable' : 'Enable'}
                         </button>
-                        <button onclick="closeDrawer()" class="btn">Close</button>
                     </div>
                 </div>
                 
@@ -545,6 +552,24 @@
 
         function toggleDnsMonitoring(domainId) {
             fetch(`/domains/${domainId}/toggle-dns-monitoring`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                }
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    openDrawer(domainId);
+                } else {
+                    alert(data.message);
+                }
+            });
+        }
+
+        function toggleCertMonitoring(domainId) {
+            fetch(`/domains/${domainId}/toggle-cert-monitoring`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

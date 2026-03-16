@@ -92,6 +92,11 @@ class MonitorDns extends Command
             ->where('created_at', '>=', $startTime)
             ->get();
 
+        if ($changes->isEmpty()) {
+            $this->info("No DNS changes detected. Skipping notification email.");
+            return;
+        }
+
         try {
             Mail::to($recipients)->send(new DnsHealthReport($changes));
             $this->info("Notification email sent to " . implode(', ', $recipients));

@@ -7,12 +7,13 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Domain extends Model
 {
-    protected $fillable = ['name', 'notes', 'allowed_groups', 'is_enabled', 'dns_monitored', 'last_dns_check', 'last_cert_check'];
+    protected $fillable = ['name', 'notes', 'allowed_groups', 'is_enabled', 'dns_monitored', 'cert_monitored', 'last_dns_check', 'last_cert_check'];
 
     protected $casts = [
         'allowed_groups' => 'array',
         'is_enabled' => 'boolean',
         'dns_monitored' => 'boolean',
+        'cert_monitored' => 'boolean',
         'last_dns_check' => 'datetime',
         'last_cert_check' => 'datetime',
     ];

@@ -30,6 +30,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/domains/{domain}/notes', [DomainController::class, 'updateNotes'])->name('domains.notes.update');
     Route::post('/domains/{domain}/toggle-status', [DomainController::class, 'toggleStatus'])->name('domains.toggle-status');
     Route::post('/domains/{domain}/toggle-dns-monitoring', [DomainController::class, 'toggleDnsMonitoring'])->name('domains.toggle-dns-monitoring');
+    Route::post('/domains/{domain}/toggle-cert-monitoring', [DomainController::class, 'toggleCertMonitoring'])->name('domains.toggle-cert-monitoring');
     Route::delete('/tags/{tag}', [DomainController::class, 'removeTag'])->name('tags.remove');
     Route::get('/domains/{domain}/preview-csr-config', [CertificateController::class, 'previewCsrConfig'])->name('domains.preview-csr-config');
     Route::post('/domains/{domain}/initiate-request', [CertificateController::class, 'initiateRequest'])->name('domains.initiate-request');

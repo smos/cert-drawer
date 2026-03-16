@@ -15,15 +15,27 @@ class DnsService
      */
     public function getDnsRecords(string $domain, ?string $resolver = null): array
     {
-        $records = $this->fetchRecords($domain, $resolver);
+        try {
+            $records = $this->fetchRecords($domain, $resolver);
+        } catch (\Exception $e) {
+            if ($resolver) {
+                Log::info("DNS check for {$domain} failed using resolver {$resolver}: " . $e->getMessage() . ". Falling back to local system DNS.");
+                return $this->fetchRecords($domain, null);
+            }
+            throw $e;
+        }
         
         // Check if we got anything useful (A, AAAA, TXT or NS)
         $hasAnyData = !empty($records['A']) || !empty($records['AAAA']) || !empty($records['TXT']) || !empty($records['NS']);
 
-        // Fallback to local DNS if resolver was used and failed to return major record types
+        // Fallback to local DNS if resolver was used and failed to return major record types (even if no exception was thrown but records are empty)
         if ($resolver && !$hasAnyData) {
-            Log::info("DNS check for {$domain} failed using resolver {$resolver}, falling back to local system DNS.");
-            $records = $this->fetchRecords($domain, null);
+            Log::info("DNS check for {$domain} returned no major records using resolver {$resolver}, falling back to local system DNS.");
+            try {
+                $records = $this->fetchRecords($domain, null);
+            } catch (\Exception $e) {
+                throw $e;
+            }
         }
 
         return $records;
@@ -41,7 +53,13 @@ class DnsService
         
         foreach ($types as $type) {
             $output = [];
-            exec("dig {$resolverPart} +short " . escapeshellarg($domain) . " " . escapeshellarg($type) . " +tries=5", $output);
+            $resultCode = 0;
+            exec("dig {$resolverPart} +short " . escapeshellarg($domain) . " " . escapeshellarg($type) . " +tries=5 +time=5", $output, $resultCode);
+            
+            if ($resultCode !== 0) {
+                throw new \Exception("DNS query failed for {$domain} type {$type} with exit code {$resultCode}");
+            }
+
             $cleaned = array_filter(array_map('trim', $output));
             
             if ($type === 'TXT') {
@@ -54,7 +72,11 @@ class DnsService
         
         // DMARC
         $dmarc = [];
-        exec("dig {$resolverPart} +short _dmarc." . escapeshellarg($domain) . " TXT +tries=5", $dmarc);
+        $resultCode = 0;
+        exec("dig {$resolverPart} +short _dmarc." . escapeshellarg($domain) . " TXT +tries=5 +time=5", $dmarc, $resultCode);
+        if ($resultCode !== 0) {
+            throw new \Exception("DNS query failed for _dmarc.{$domain} TXT with exit code {$resultCode}");
+        }
         $records['DMARC'] = array_values(array_filter(array_map('trim', $dmarc)));
 
         // DKIM
@@ -63,7 +85,11 @@ class DnsService
         foreach ($dkim_selectors as $selector) {
             $fqdn = "{$selector}._domainkey.{$domain}";
             $out = [];
-            exec("dig {$resolverPart} +short " . escapeshellarg($fqdn) . " TXT +tries=5", $out);
+            $resultCode = 0;
+            exec("dig {$resolverPart} +short " . escapeshellarg($fqdn) . " TXT +tries=5 +time=5", $out, $resultCode);
+            if ($resultCode !== 0) {
+                throw new \Exception("DNS query failed for {$fqdn} TXT with exit code {$resultCode}");
+            }
             foreach ($out as $line) {
                 if (stripos($line, 'v=DKIM1') !== false) {
                     $dkim_records[] = "{$selector}: {$line}";

@@ -145,10 +145,15 @@ class DomainController extends Controller
             'name' => 'required|unique:domains,name',
             'notes' => 'nullable|string',
             'dns_monitored' => 'nullable|boolean',
+            'cert_monitored' => 'nullable|boolean',
         ]);
 
         if (!isset($validated['dns_monitored'])) {
             $validated['dns_monitored'] = !str_starts_with($validated['name'], '*.');
+        }
+
+        if (!isset($validated['cert_monitored'])) {
+            $validated['cert_monitored'] = !str_starts_with($validated['name'], '*.');
         }
 
         $domain = Domain::create($validated);
@@ -368,6 +373,21 @@ class DomainController extends Controller
         AuditLog::log('domain_toggle_dns', "DNS monitoring for {$domain->name} was {$status}");
 
         return response()->json(['success' => true, 'dns_monitored' => $domain->dns_monitored]);
+    }
+
+    public function toggleCertMonitoring(Domain $domain)
+    {
+        $this->authorizeAccess($domain);
+
+        if (str_starts_with($domain->name, '*.')) {
+            return response()->json(['success' => false, 'message' => 'Certificate health monitoring is not available for wildcard domains.'], 400);
+        }
+
+        $domain->update(['cert_monitored' => !$domain->cert_monitored]);
+        $status = $domain->cert_monitored ? 'enabled' : 'disabled';
+        AuditLog::log('domain_toggle_cert_health', "Certificate monitoring for {$domain->name} was {$status}");
+
+        return response()->json(['success' => true, 'cert_monitored' => $domain->cert_monitored]);
     }
 
     public function destroy(Domain $domain)
