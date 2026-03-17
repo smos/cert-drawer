@@ -199,6 +199,10 @@ subjectAltName = @alt_names
 
     public function getOpenSslConfig(array $dn, array $altNames)
     {
+        $sanitize = function($val) {
+            return str_replace(["\r", "\n", "[", "]"], '', $val);
+        };
+
         $config = "[ req ]
 default_bits        = 4096
 distinguished_name = req_distinguished_name
@@ -206,12 +210,12 @@ req_extensions     = req_ext
 prompt             = no
 
 [ req_distinguished_name ]
-C  = " . ($dn['countryName'] ?? '') . "
-ST = " . ($dn['stateOrProvinceName'] ?? '') . "
-L  = " . ($dn['localityName'] ?? '') . "
-O  = " . ($dn['organizationName'] ?? '') . "
-OU = " . ($dn['organizationalUnitName'] ?? '') . "
-CN = " . ($dn['commonName'] ?? 'localhost') . "
+C  = " . $sanitize($dn['countryName'] ?? '') . "
+ST = " . $sanitize($dn['stateOrProvinceName'] ?? '') . "
+L  = " . $sanitize($dn['localityName'] ?? '') . "
+O  = " . $sanitize($dn['organizationName'] ?? '') . "
+OU = " . $sanitize($dn['organizationalUnitName'] ?? '') . "
+CN = " . $sanitize($dn['commonName'] ?? 'localhost') . "
 
 [ req_ext ]
 subjectAltName = @alt_names
@@ -225,6 +229,7 @@ subjectAltName = @alt_names
         $dnsCount = 1;
         $ipCount = 1;
         foreach ($altNames as $name) {
+            $name = $sanitize($name);
             if (filter_var($name, FILTER_VALIDATE_IP)) {
                 $config .= "IP." . ($ipCount++) . " = " . $name . "\n";
             } else {

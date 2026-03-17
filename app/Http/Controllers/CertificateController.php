@@ -42,7 +42,13 @@ class CertificateController extends Controller
 
         $validated = $request->validate([
             'csr_option' => ['required', Rule::in(['auto', 'custom', 'upload'])],
-            'cn' => 'required_if:csr_option,custom|string|max:255',
+            'cn' => [
+                'required_if:csr_option,custom',
+                'nullable',
+                'string',
+                'max:255',
+                'regex:/^(\*\.)?([a-zA-Z0-9- \._]+\.)*[a-zA-Z0-9- \._]+$/'
+            ],
             'sans' => 'nullable|array',
         ]);
 
@@ -92,7 +98,13 @@ class CertificateController extends Controller
 
         $validated = $request->validate([
             'csr_option' => ['required', Rule::in(['auto', 'custom', 'upload', 'manual_config'])],
-            'cn' => 'required_if:csr_option,custom|string|max:255',
+            'cn' => [
+                'required_if:csr_option,custom',
+                'nullable',
+                'string',
+                'max:255',
+                'regex:/^(\*\.)?([a-zA-Z0-9- \._]+\.)*[a-zA-Z0-9- \._]+$/'
+            ],
             'sans' => 'nullable|array',
             'csr' => 'required_if:csr_option,upload|string',
             'config' => 'required_if:csr_option,manual_config|string',

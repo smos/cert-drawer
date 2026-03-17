@@ -142,10 +142,16 @@ class DomainController extends Controller
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'name' => 'required|unique:domains,name',
+            'name' => [
+                'required',
+                'unique:domains,name',
+                'regex:/^(\*\.)?([a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+$/'
+            ],
             'notes' => 'nullable|string',
             'dns_monitored' => 'nullable|boolean',
             'cert_monitored' => 'nullable|boolean',
+        ], [
+            'name.regex' => 'The domain name format is invalid. Only alphanumeric characters, dots, and hyphens are allowed.'
         ]);
 
         if (!isset($validated['dns_monitored'])) {
@@ -233,8 +239,8 @@ class DomainController extends Controller
         }
 
         $cn = $info['subject']['commonName'] ?? $info['subject']['CN'] ?? null;
-        if (!$cn) {
-            return back()->withErrors(['error' => 'Could not extract Common Name from certificate.']);
+        if (!$cn || !preg_match('/^(\*\.)?([a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+$/', $cn)) {
+            return back()->withErrors(['error' => 'Could not extract a valid Common Name from certificate.']);
         }
 
         $domain = Domain::firstOrCreate(['name' => $cn]);
@@ -277,8 +283,8 @@ class DomainController extends Controller
         }
 
         $cn = $res['info']['subject']['CN'] ?? null;
-        if (!$cn) {
-            return back()->withErrors(['error' => 'Could not extract Common Name from PFX.']);
+        if (!$cn || !preg_match('/^(\*\.)?([a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+$/', $cn)) {
+            return back()->withErrors(['error' => 'Could not extract a valid Common Name from PFX.']);
         }
 
         $domain = Domain::firstOrCreate(['name' => $cn]);
@@ -400,6 +406,12 @@ class DomainController extends Controller
 
         $domainName = $domain->name;
         
+        // Safety check: ensure domain name is not malicious before purging files
+        if (str_contains($domainName, '..') || str_contains($domainName, '/') || str_contains($domainName, '\\')) {
+            Log::error("Attempted to delete a domain with a malicious name: {$domainName}");
+            return response()->json(['success' => false, 'message' => 'Invalid domain name for file purging.'], 400);
+        }
+
         // Purge files
         $path = "certificates/" . $domainName;
         if (\Illuminate\Support\Facades\Storage::disk('local')->exists($path)) {

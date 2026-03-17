@@ -22,7 +22,7 @@ class AutomationController extends Controller
         $validated = $request->validate([
             'domain_id' => 'required|exists:domains,id',
             'type' => 'required|in:kemp',
-            'hostname' => 'required|string',
+            'hostname' => 'required|regex:/^([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])(\.([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9]))*$/',
             'password' => 'required|string',
             'config' => 'required|array',
         ]);

@@ -44,6 +44,12 @@ class AcmeService
         $certService = app(CertificateService::class);
         $info = $certService->getCertInfoFromCsr($certificate->csr);
         $commonName = $info['commonName'] ?? $certificate->domain->name;
+
+        // Sanitize commonName to prevent directory traversal in paths
+        if (is_array($commonName)) $commonName = $commonName[0];
+        $commonName = preg_replace('/[^a-zA-Z0-9-\._\* ]/', '_', $commonName);
+        $commonName = str_replace('..', '__', $commonName);
+
         $sans = $certService->extractSansFromCsr($certificate->csr);
         $allDomains = array_unique(array_merge([$commonName], $sans));
 
