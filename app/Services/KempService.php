@@ -16,39 +16,46 @@ class KempService
     public function deploy(Automation $automation, Certificate $certificate)
     {
         $hostname = $automation->hostname;
-        $apiKey = $automation->getDecryptedPassword(); // We store API Key in the password field
+        $apiKey = $automation->getDecryptedPassword();
         
-        $certName = "auto_" . str_replace('*', 'wildcard', $certificate->domain->name);
+        // Use underscores for dots to be safe and consistent with modern naming conventions
+        $certName = "auto_" . str_replace(['*', '.'], ['wildcard', '_'], $certificate->domain->name);
 
-        // 1. Prepare PFX data
-        $tempPassword = bin2hex(random_bytes(8));
-        $pfxData = app(CertificateService::class)->generatePfx(
-            $certificate->certificate,
-            decrypt($certificate->private_key),
-            $tempPassword
-        );
+        // 1. Prepare Combined PEM data (Certificate + Private Key)
+        // Note: Kemp API v2 expects a combined PEM string encoded in Base64 for 'addcert'
+        $privateKey = decrypt($certificate->private_key);
+        $combinedPem = $certificate->certificate . "\n" . $privateKey;
+        $base64Data = base64_encode($combinedPem);
 
-        $url = "https://{$hostname}/access/show?v=2";
+        // 2. Check if certificate already exists to decide on 'replace' flag
+        $existingCerts = $this->listCerts($automation);
+        $exists = false;
+        foreach ($existingCerts as $c) {
+            if (($c['name'] ?? '') === $certName) {
+                $exists = true;
+                break;
+            }
+        }
 
-        // 2. Upload/Replace Certificate
-        // Note: Kemp API v2 uses a single endpoint with JSON body
+        $url = "https://{$hostname}/accessv2";
+
+        // 3. Upload/Replace Certificate
         $response = Http::withoutVerifying()
             ->post($url, [
                 'cmd' => 'addcert',
                 'apikey' => $apiKey,
                 'cert' => $certName,
-                'data' => base64_encode($pfxData),
-                'pass' => $tempPassword,
-                'replace' => 1
+                'data' => $base64Data,
+                'replace' => $exists ? 1 : 0
             ]);
 
         if (!$response->successful() || ($response->json()['status'] ?? '') === 'fail') {
-            Log::error("Kemp AddCert Failed: " . $response->body());
-            $msg = $response->json()['error'] ?? $response->body();
+            Log::error("Kemp AddCert Failed for {$certName}: " . $response->body());
+            $msg = $response->json()['error'] ?? $response->json()['message'] ?? $response->body();
             throw new Exception("Failed to upload certificate to Kemp: " . $msg);
         }
 
-        Log::info("Successfully deployed cert {$certName} to Kemp at {$hostname}");
+        Log::info("Successfully deployed cert {$certName} to Kemp at {$hostname} (Replace: " . ($exists ? 'Yes' : 'No') . ")");
         return true;
     }
 
@@ -59,7 +66,7 @@ class KempService
     {
         $hostname = $automation->hostname;
         $apiKey = $automation->getDecryptedPassword();
-        $url = "https://{$hostname}/access/show?v=2";
+        $url = "https://{$hostname}/accessv2";
 
         $response = Http::withoutVerifying()
             ->post($url, [
@@ -68,9 +75,43 @@ class KempService
             ]);
 
         if (!$response->successful()) {
-            throw new Exception("Failed to list certificates: " . $response->body());
+            $error = $response->json()['error'] ?? $response->body();
+            throw new Exception("Failed to list certificates: " . $error);
         }
 
-        return $response->json()['data'] ?? [];
+        $data = $response->json();
+        if (($data['status'] ?? '') === 'fail') {
+            throw new Exception("Kemp API Error: " . ($data['error'] ?? 'Unknown error'));
+        }
+
+        return $data['cert'] ?? [];
+    }
+
+    /**
+     * Get a specific certificate from the Kemp device.
+     */
+    public function getCert(Automation $automation, string $certName)
+    {
+        $hostname = $automation->hostname;
+        $apiKey = $automation->getDecryptedPassword();
+        $url = "https://{$hostname}/accessv2";
+
+        $response = Http::withoutVerifying()
+            ->post($url, [
+                'cmd' => 'readcert',
+                'apikey' => $apiKey,
+                'cert' => $certName
+            ]);
+
+        if (!$response->successful()) {
+            return null;
+        }
+
+        $data = $response->json();
+        if (($data['status'] ?? '') === 'ok' && isset($data['certificate'])) {
+            return $data['certificate'];
+        }
+
+        return null;
     }
 }

@@ -47,7 +47,7 @@ class CertificateController extends Controller
                 'nullable',
                 'string',
                 'max:255',
-                'regex:/^(\*\.)?([a-zA-Z0-9- \._]+\.)*[a-zA-Z0-9- \._]+$/'
+                'regex:#^(\*\.)?([a-zA-Z0-9- \._]+\.)*[a-zA-Z0-9- \._]+$#'
             ],
             'sans' => 'nullable|array',
         ]);
@@ -103,7 +103,7 @@ class CertificateController extends Controller
                 'nullable',
                 'string',
                 'max:255',
-                'regex:/^(\*\.)?([a-zA-Z0-9- \._]+\.)*[a-zA-Z0-9- \._]+$/'
+                'regex:#^(\*\.)?([a-zA-Z0-9- \._]+\.)*[a-zA-Z0-9- \._]+$#'
             ],
             'sans' => 'nullable|array',
             'csr' => 'required_if:csr_option,upload|string',

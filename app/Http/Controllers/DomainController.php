@@ -145,11 +145,11 @@ class DomainController extends Controller
             'name' => [
                 'required',
                 'unique:domains,name',
-                'regex:/^(\*\.)?([a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+$/'
+                'regex:#^(\*\.)?([a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+$#'
             ],
-            'notes' => 'nullable|string',
-            'dns_monitored' => 'nullable|boolean',
-            'cert_monitored' => 'nullable|boolean',
+            'notes' => ['nullable', 'string'],
+            'dns_monitored' => ['nullable', 'boolean'],
+            'cert_monitored' => ['nullable', 'boolean'],
         ], [
             'name.regex' => 'The domain name format is invalid. Only alphanumeric characters, dots, and hyphens are allowed.'
         ]);
@@ -239,7 +239,7 @@ class DomainController extends Controller
         }
 
         $cn = $info['subject']['commonName'] ?? $info['subject']['CN'] ?? null;
-        if (!$cn || !preg_match('/^(\*\.)?([a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+$/', $cn)) {
+        if (!$cn || !preg_match('#^(\*\.)?([a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+$#', $cn)) {
             return back()->withErrors(['error' => 'Could not extract a valid Common Name from certificate.']);
         }
 
@@ -283,7 +283,7 @@ class DomainController extends Controller
         }
 
         $cn = $res['info']['subject']['CN'] ?? null;
-        if (!$cn || !preg_match('/^(\*\.)?([a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+$/', $cn)) {
+        if (!$cn || !preg_match('#^(\*\.)?([a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+$#', $cn)) {
             return back()->withErrors(['error' => 'Could not extract a valid Common Name from PFX.']);
         }
 

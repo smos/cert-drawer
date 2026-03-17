@@ -154,7 +154,7 @@ class ImportFolder extends Command
         }
 
         // Validate name to prevent directory traversal or other injection
-        if (!$name || !preg_match('/^(\*\.)?([a-zA-Z0-9- \._]+\.)*[a-zA-Z0-9- \._]+$/', $name)) {
+        if (!$name || !preg_match('#^(\*\.)?([a-zA-Z0-9- \._]+\.)*[a-zA-Z0-9- \._]+$#', $name)) {
             $this->warn("  Skipping group '{$fallbackName}': Invalid domain name format '{$name}'");
             return;
         }
