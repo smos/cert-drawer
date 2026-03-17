@@ -24,6 +24,9 @@ Certificate Details
 - ADCS Certificate fulfilment using ADCS Webserver
 - ACME Certificate fulfilment (tested with networking4all.com)
 - Audit Logging
+- DNS monitoring for domains with change tracking
+- Certificate monitoring for domains with change tracking
+- Automated emails on changes to DNS/Certificates
 
 # Automation Wishlist, not yet working, TODO
 - Kemp (API) (placeholder)
@@ -34,6 +37,59 @@ Certificate Details
 # Deployment
 This can be deployed through docker using the image from databeestje/cert-drawer
 This should init a new install and first signon will prompt for the local admin user.
+
+Example Stack content for Portainer
+
+	services:
+	  certkast:
+	    image: databeestje/cert-drawer
+	    container_name: cert-drawer
+	    volumes:
+	      - cert-data:/var/www/html/storage/app/private/certificates
+	      - db-data:/var/www/html/storage/database
+	      - acme-data:/acme
+	    environment:
+	      - APP_ENV=https://certdrawer.hdnet.nl
+	      - APP_ENV=production
+	      - APP_DEBUG=false
+	      - APP_KEY=
+	      - DB_CONNECTION=sqlite
+	      - DB_DATABASE=/var/www/html/storage/database/database.sqlite
+	      - ACME_HOME=/acme
+	      - ACME_CERTS=/acme/certs
+	      - ACME_BINARY=/acme/acme.sh
+	    restart: unless-stopped
+	    healthcheck:
+	      test: ["CMD", "curl", "-f -s", "http://localhost/health"]
+	      interval: 30s
+	      timeout: 10s
+	      retries: 3
+	
+	  scheduler:
+	    image: databeestje/cert-drawer-scheduler
+	    container_name: cert-drawer-scheduler
+	    entrypoint: ["/usr/local/bin/entrypoint.sh", "php", "artisan", "schedule:work"]
+	    volumes:
+	      - cert-data:/var/www/html/storage/app/private/certificates
+	      - db-data:/var/www/html/storage/database
+	      - acme-data:/acme
+	    environment:
+	      - APP_ENV=production
+	      - APP_DEBUG=false
+	      - APP_KEY=
+	      - DB_DATABASE=/var/www/html/storage/database/database.sqlite
+	      - DB_CONNECTION=sqlite
+	      - ACME_HOME=/acme
+	      - ACME_CERTS=/acme/certs
+	      - ACME_BINARY=/acme/acme.sh
+	    restart: unless-stopped
+	
+	volumes:
+	  cert-data:
+	  db-data:
+	  acme-data:
+
+
 
 Inital deployment will generate a Self-Signed Root, Intermediate and domain.local certificates to allow some interaction.
 
