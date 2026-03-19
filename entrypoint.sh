@@ -1,8 +1,10 @@
 #!/bin/bash
 set -e
 
-# Handle APP_KEY persistence in the database volume
-KEY_FILE="/var/www/html/database/.app_key"
+# Handle APP_KEY persistence in the same directory as the database
+DB_PATH=${DB_DATABASE:-/var/www/html/database/database.sqlite}
+DB_DIR=$(dirname "$DB_PATH")
+KEY_FILE="$DB_DIR/.app_key"
 
 if [ -z "$APP_KEY" ]; then
     if [ -f "$KEY_FILE" ]; then
@@ -12,6 +14,7 @@ if [ -z "$APP_KEY" ]; then
         echo "Generating new APP_KEY..."
         # Generate key and capture only the key part (base64:...)
         NEW_KEY=$(php artisan key:generate --show --no-ansi)
+        mkdir -p "$DB_DIR"
         echo "$NEW_KEY" > "$KEY_FILE"
         export APP_KEY="$NEW_KEY"
         echo "New APP_KEY generated and persisted to $KEY_FILE"
@@ -19,10 +22,11 @@ if [ -z "$APP_KEY" ]; then
 fi
 
 # Ensure SQLite database exists in the persistent volume
-if [ ! -f /var/www/html/database/database.sqlite ]; then
-    echo "Creating initial database..."
-    touch /var/www/html/database/database.sqlite
-    chown www-data:www-data /var/www/html/database/database.sqlite
+if [ ! -f "$DB_PATH" ]; then
+    echo "Creating initial database at $DB_PATH..."
+    mkdir -p "$DB_DIR"
+    touch "$DB_PATH"
+    chown www-data:www-data "$DB_PATH"
     
     # Run migrations and seed for the first time
     echo "Running initial migrations and seeding..."

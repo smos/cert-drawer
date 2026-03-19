@@ -4,6 +4,7 @@ namespace Database\Seeders;
 
 use App\Models\User;
 use App\Models\Setting;
+use App\Models\Domain;
 use Illuminate\Database\Seeder;
 
 class DatabaseSeeder extends Seeder
@@ -36,12 +37,18 @@ class DatabaseSeeder extends Seeder
             'admin_email' => 'admin@domain.local',
         ];
 
-        foreach ($defaultSettings as $key => $value) {
-            Setting::updateOrCreate(['key' => $key], ['value' => $value]);
+        // Only seed settings if the table is empty
+        if (Setting::count() === 0) {
+            foreach ($defaultSettings as $key => $value) {
+                Setting::updateOrCreate(['key' => $key], ['value' => $value]);
+            }
         }
 
-        $this->call([
-            InitialPKISeeder::class,
-        ]);
+        // Only run PKI seeder if no domains exist
+        if (Domain::count() === 0) {
+            $this->call([
+                InitialPKISeeder::class,
+            ]);
+        }
     }
 }
