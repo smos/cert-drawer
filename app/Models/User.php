@@ -57,9 +57,11 @@ class User extends Authenticatable implements LdapAuthenticatable
     {
         return \Cache::remember('user_groups_' . $this->id, 60, function () {
             try {
-                $ldapUser = \App\Models\LdapUser::where('mail', $this->email)
-                    ->orWhere('userprincipalname', $this->email)
-                    ->first();
+                // Find LDAP User by mail or UPN (same as LoginController)
+                $ldapUser = \App\Models\LdapUser::where('mail', $this->email)->first();
+                if (!$ldapUser) {
+                    $ldapUser = \App\Models\LdapUser::where('userprincipalname', $this->email)->first();
+                }
                 
                 if (!$ldapUser) return [];
                 
