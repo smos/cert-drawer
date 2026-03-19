@@ -15,43 +15,29 @@ class CertificateService
 
     public function generateCsrWithConfig(string $configContent, array $dn = [])
     {
-        $configArgs = [
-            "digest_alg" => "sha256",
-            "private_key_bits" => 4096,
-            "private_key_type" => OPENSSL_KEYTYPE_RSA,
-        ];
-
-        // Create the private key
-        $privKey = openssl_pkey_new($configArgs);
-
-        // If $dn is empty and prompt=no, openssl_csr_new might create an empty subject.
-        // We can try to parse the DN from the configContent if it's empty.
-        if (empty($dn)) {
-            $dn = [];
-            if (preg_match('/\[ req_distinguished_name \](.*?)\[/s', $configContent, $matches)) {
-                $section = $matches[1];
-                if (preg_match('/C\s*=\s*(.*)/', $section, $m)) $dn['countryName'] = trim($m[1]);
-                if (preg_match('/ST\s*=\s*(.*)/', $section, $m)) $dn['stateOrProvinceName'] = trim($m[1]);
-                if (preg_match('/L\s*=\s*(.*)/', $section, $m)) $dn['localityName'] = trim($m[1]);
-                if (preg_match('/O\s*=\s*(.*)/', $section, $m)) $dn['organizationName'] = trim($m[1]);
-                if (preg_match('/OU\s*=\s*(.*)/', $section, $m)) $dn['organizationalUnitName'] = trim($m[1]);
-                if (preg_match('/CN\s*=\s*(.*)/', $section, $m)) $dn['commonName'] = trim($m[1]);
-            }
-        }
-
-        $tmpConfigFile = tempnam(sys_get_temp_dir(), 'openssl_');
+        $tmpConfigFile = tempnam(sys_get_temp_dir(), 'openssl_conf_');
+        $tmpKeyFile = tempnam(sys_get_temp_dir(), 'openssl_key_');
+        $tmpCsrFile = tempnam(sys_get_temp_dir(), 'openssl_csr_');
+        
         file_put_contents($tmpConfigFile, $configContent);
 
-        // Generate a CSR
-        $csr = openssl_csr_new($dn, $privKey, [
-            "digest_alg" => "sha256",
-            "config" => $tmpConfigFile,
-        ]);
-
-        openssl_csr_export($csr, $csrOut);
-        openssl_pkey_export($privKey, $keyOut);
+        // Use CLI openssl as it's much more reliable with custom configs than PHP's openssl_csr_new
+        // -nodes means no password on the private key
+        $cmd = "openssl req -new -newkey rsa:4096 -nodes -keyout " . escapeshellarg($tmpKeyFile) . 
+               " -out " . escapeshellarg($tmpCsrFile) . " -config " . escapeshellarg($tmpConfigFile) . " 2>&1";
+        
+        $output = shell_exec($cmd);
+        
+        $csrOut = (file_exists($tmpCsrFile) && filesize($tmpCsrFile) > 0) ? file_get_contents($tmpCsrFile) : null;
+        $keyOut = (file_exists($tmpKeyFile) && filesize($tmpKeyFile) > 0) ? file_get_contents($tmpKeyFile) : null;
 
         unlink($tmpConfigFile);
+        if (file_exists($tmpKeyFile)) unlink($tmpKeyFile);
+        if (file_exists($tmpCsrFile)) unlink($tmpCsrFile);
+
+        if (!$csrOut || !$keyOut) {
+            throw new Exception("OpenSSL CSR generation failed. Output: " . $output);
+        }
 
         return [
             'csr' => $csrOut,
@@ -210,7 +196,7 @@ req_extensions     = req_ext
 prompt             = no
 
 [ req_distinguished_name ]
-C  = " . $sanitize($dn['countryName'] ?? '') . "
+C  = " . substr($sanitize($dn['countryName'] ?? 'NL'), 0, 2) . "
 ST = " . $sanitize($dn['stateOrProvinceName'] ?? '') . "
 L  = " . $sanitize($dn['localityName'] ?? '') . "
 O  = " . $sanitize($dn['organizationName'] ?? '') . "
@@ -334,9 +320,19 @@ subjectAltName = @alt_names
 
     public function extractSansFromCsr(string $csrPem)
     {
+        $tmp = tempnam(sys_get_temp_dir(), 'csr_');
+        file_put_contents($tmp, $csrPem);
+        
+        $cmd = "openssl req -in " . escapeshellarg($tmp) . " -noout -text 2>&1";
+        $output = shell_exec($cmd);
+        unlink($tmp);
+
         $sans = [];
-        if (preg_match_all('/(DNS|IP):([^, \n\r]+)/', $csrPem, $matches)) {
-            return array_unique($matches[2]);
+        if (preg_match('/Subject Alternative Name:.*?\n\s*(.*?)\n/s', $output, $matches)) {
+            $parts = explode(',', $matches[1]);
+            foreach ($parts as $part) {
+                $sans[] = trim(str_replace(['DNS:', 'IP Address:'], '', $part));
+            }
         }
         return $sans;
     }

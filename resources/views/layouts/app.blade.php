@@ -1127,6 +1127,8 @@
                         `;
                     } else if (data.type === 'CSR') {
                         html += `
+                            <tr style="border-bottom:1px solid #eee"><td style="padding:8px; font-weight:600;">Subject</td><td style="padding:8px; font-size:0.8rem;">${data.subject}</td></tr>
+                            <tr style="border-bottom:1px solid #eee"><td style="padding:8px; font-weight:600;">SANs</td><td style="padding:8px;">${data.sans.join(', ') || 'None'}</td></tr>
                             <tr><td colspan="2" style="padding:8px; font-weight:600;">CSR Body:</td></tr>
                             <tr><td colspan="2" style="padding:8px;"><pre style="background:#f4f4f4; padding:10px; font-size:0.75rem; border-radius:4px; overflow-x:auto;">${data.csr_body}</pre></td></tr>
                         `;

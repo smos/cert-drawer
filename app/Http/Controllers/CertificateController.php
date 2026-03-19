@@ -114,36 +114,41 @@ class CertificateController extends Controller
         $privateKey = null;
         $settings = Setting::all()->pluck('value', 'key');
 
-        if ($validated['csr_option'] === 'manual_config') {
-            $res = $this->certService->generateCsrWithConfig($validated['config']);
-            $csr = $res['csr'];
-            $privateKey = $res['private_key'];
-        } elseif ($validated['csr_option'] === 'custom') {
-            $dn = [
-                "countryName" => $settings['dn_country'] ?? "NL",
-                "stateOrProvinceName" => $settings['dn_state'] ?? "State",
-                "localityName" => $settings['dn_locality'] ?? "Locality",
-                "organizationName" => $settings['dn_organization'] ?? "Organization",
-                "organizationalUnitName" => $settings['dn_ou'] ?? "IT Department",
-                "commonName" => $validated['cn'],
-            ];
-            $res = $this->certService->generateCsr($dn, $validated['sans']);
-            $csr = $res['csr'];
-            $privateKey = $res['private_key'];
-        } elseif ($validated['csr_option'] === 'upload') {
-            $csr = $validated['csr'];
-        } else { // auto
-            $dn = [
-                "countryName" => $settings['dn_country'] ?? "NL",
-                "stateOrProvinceName" => $settings['dn_state'] ?? "State",
-                "localityName" => $settings['dn_locality'] ?? "Locality",
-                "organizationName" => $settings['dn_organization'] ?? "Organization",
-                "organizationalUnitName" => $settings['dn_ou'] ?? "IT Department",
-                "commonName" => $domain->name,
-            ];
-            $res = $this->certService->generateCsr($dn);
-            $csr = $res['csr'];
-            $privateKey = $res['private_key'];
+        try {
+            if ($validated['csr_option'] === 'manual_config') {
+                $res = $this->certService->generateCsrWithConfig($validated['config']);
+                $csr = $res['csr'];
+                $privateKey = $res['private_key'];
+            } elseif ($validated['csr_option'] === 'custom') {
+                $dn = [
+                    "countryName" => $settings['dn_country'] ?? "NL",
+                    "stateOrProvinceName" => $settings['dn_state'] ?? "State",
+                    "localityName" => $settings['dn_locality'] ?? "Locality",
+                    "organizationName" => $settings['dn_organization'] ?? "Organization",
+                    "organizationalUnitName" => $settings['dn_ou'] ?? "IT Department",
+                    "commonName" => $validated['cn'],
+                ];
+                $res = $this->certService->generateCsr($dn, $validated['sans']);
+                $csr = $res['csr'];
+                $privateKey = $res['private_key'];
+            } elseif ($validated['csr_option'] === 'upload') {
+                $csr = $validated['csr'];
+            } else { // auto
+                $dn = [
+                    "countryName" => $settings['dn_country'] ?? "NL",
+                    "stateOrProvinceName" => $settings['dn_state'] ?? "State",
+                    "localityName" => $settings['dn_locality'] ?? "Locality",
+                    "organizationName" => $settings['dn_organization'] ?? "Organization",
+                    "organizationalUnitName" => $settings['dn_ou'] ?? "IT Department",
+                    "commonName" => $domain->name,
+                ];
+                $res = $this->certService->generateCsr($dn);
+                $csr = $res['csr'];
+                $privateKey = $res['private_key'];
+            }
+        } catch (\Exception $e) {
+            \Log::error("CSR Generation Error: " . $e->getMessage());
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         }
 
         if (!$csr) {
@@ -280,6 +285,11 @@ class CertificateController extends Controller
         } elseif ($certificate->csr) {
             $details['type'] = 'CSR';
             $details['csr_body'] = $certificate->csr;
+            
+            $subject = $this->certService->getCertInfoFromCsr($certificate->csr);
+            $details['subject'] = $subject['CN'] ?? 'Unknown';
+            $details['full_subject'] = json_encode($subject ?: []);
+            $details['sans'] = $this->certService->extractSansFromCsr($certificate->csr);
         }
 
         return response()->json($details);
