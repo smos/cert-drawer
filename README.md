@@ -66,7 +66,7 @@ Example Stack content for Portainer
 	      retries: 3
 	
 	  scheduler:
-	    image: databeestje/cert-drawer-scheduler
+	    image: databeestje/cert-drawer
 	    container_name: cert-drawer-scheduler
 	    entrypoint: ["/usr/local/bin/entrypoint.sh", "php", "artisan", "schedule:work"]
 	    volumes:
@@ -90,6 +90,12 @@ Example Stack content for Portainer
 	  acme-data:
 
 
+Make sure to comnfigure the local Docker instance with IPv6, as it will poke at both when it resolves either.
+
+On the docker host I modified the daemon.json with "ipv6:true" and a ULA prefix for the default bridge "fixed-cidr-v6": "fd00:dead:beef::/80"
+The docker host is hosted in a /64 subnet, the host has single ip6 address <prefix48>:<subnet>::<ip>/112.
+For a Portainer stack this requires removing the created network by the stack and manually adding it with the tags "ipv6: true", "experimental: true" and "ip6tables:true". 
+On the newly created network I use the subnet "<prefix48>:<subnet>:<ip>::/80", range "<prefix48>:<subnet>:<ip>::/96" and gateway "<prefix48>:<subnet>:<ip>::1".
 
 Inital deployment will generate a Self-Signed Root, Intermediate and domain.local certificates to allow some interaction.
 
