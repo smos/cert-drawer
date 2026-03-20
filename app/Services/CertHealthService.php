@@ -23,6 +23,12 @@ class CertHealthService
         // Resolve A and AAAA records
         $ips = $this->resolveIps($domain->name, $resolver);
 
+        // Fallback to local DNS if resolver was used and failed to return records
+        if (empty($ips) && $resolver) {
+            Log::info("Cert health DNS check for {$domain->name} returned no IPs using resolver {$resolver}, falling back to local system DNS.");
+            $ips = $this->resolveIps($domain->name, null);
+        }
+
         foreach ($ips as $ipData) {
             $this->checkIp($domain, $ipData['ip'], $ipData['version']);
         }
@@ -30,13 +36,14 @@ class CertHealthService
         $domain->update(['last_cert_check' => now()]);
     }
 
-    protected function resolveIps(string $domain, string $resolver): array
+    protected function resolveIps(string $domain, ?string $resolver): array
     {
         $ips = [];
+        $resolverPart = $resolver ? "@" . escapeshellarg($resolver) : "";
         
         // Resolve IPv4
         $output4 = [];
-        exec("dig @" . escapeshellarg($resolver) . " +short " . escapeshellarg($domain) . " A +tries=3", $output4);
+        exec("dig {$resolverPart} +short " . escapeshellarg($domain) . " A +tries=3", $output4);
         foreach (array_filter(array_map('trim', $output4)) as $ip) {
             if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
                 $ips[] = ['ip' => $ip, 'version' => 'v4'];
@@ -45,7 +52,7 @@ class CertHealthService
 
         // Resolve IPv6
         $output6 = [];
-        exec("dig @" . escapeshellarg($resolver) . " +short " . escapeshellarg($domain) . " AAAA +tries=3", $output6);
+        exec("dig {$resolverPart} +short " . escapeshellarg($domain) . " AAAA +tries=3", $output6);
         foreach (array_filter(array_map('trim', $output6)) as $ip) {
             if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
                 $ips[] = ['ip' => $ip, 'version' => 'v6'];
