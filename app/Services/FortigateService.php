@@ -18,36 +18,76 @@ class FortigateService
         $host = $automation->hostname;
         $token = $automation->getDecryptedPassword();
         
-        // Use a unique name with timestamp since Fortigate doesn't allow replacing in-use certs easily
-        $timestamp = date('Ymd_Hi');
-        $baseName = "auto_" . str_replace(['*', '.'], ['wildcard', '_'], $certificate->domain->name);
-        $certName = "{$baseName}_{$timestamp}";
+        // Use a more predictable name: domain_name_certID
+        $safeName = str_replace(['*', '.'], ['wildcard', '_'], $certificate->domain->name);
+        $certName = "auto_{$safeName}_{$certificate->id}";
 
         $privateKey = decrypt($certificate->private_key);
         
-        // Use CMDB POST to create a new local certificate
-        $url = "https://{$host}/api/v2/cmdb/certificate/local?vdom=root";
+        // Build CA chain
+        $chain = [];
+        $curr = $certificate;
+        while ($curr && $curr->issuer_certificate_id) {
+            $curr = \App\Models\Certificate::find($curr->issuer_certificate_id);
+            if ($curr) {
+                $chain[] = $curr->certificate;
+            } else {
+                break;
+            }
+        }
+
+        // Generate PFX
+        $pfxPassword = bin2hex(random_bytes(8));
+        $pfxData = app(CertificateService::class)->generatePfx($certificate->certificate, $privateKey, $pfxPassword, $chain);
+
+        // Use the MONITOR endpoint which works for v7+ imports
+        $url = "https://{$host}/api/v2/monitor/vpn-certificate/local/import";
 
         $response = Http::withoutVerifying()
             ->withHeaders(['Authorization' => "Bearer {$token}"])
             ->post($url, [
-                'name' => $certName,
-                'certificate' => $certificate->certificate,
-                'private-key' => $privateKey
+                'type' => 'pkcs12',
+                'scope' => 'global',
+                'certname' => $certName,
+                'file_content' => base64_encode($pfxData),
+                'password' => $pfxPassword,
             ]);
 
         if (!$response->successful()) {
-            Log::error("Fortigate CMDB Create Failed for {$certName}: " . $response->body());
-            throw new Exception("Failed to create certificate on Fortigate: " . ($response->json()['message'] ?? $response->body()));
+            $errorData = $response->json();
+            // Error -328 usually means the certificate content already exists on the device
+            if (($errorData['error'] ?? 0) === -328) {
+                Log::info("Certificate content already exists on Fortigate. We will try to update references using the predicted name: {$certName}");
+            } else {
+                Log::error("Fortigate Import Failed for {$certName}: " . $response->body());
+                throw new Exception("Failed to import certificate on Fortigate: " . ($errorData['message'] ?? $response->body()));
+            }
+        } else {
+            Log::info("Successfully imported cert {$certName} on Fortigate at {$host}");
+
+            // Update references
+            $this->updateReferences($automation, $certificate, $certName);
+
+            return true;
+        }
+    }
+
+    /**
+     * Update all references from old certificates of this domain to the new one.
+     */
+    protected function updateReferences(Automation $automation, Certificate $certificate, string $newCertName)
+    {
+        $roles = $automation->config['roles'] ?? [];
+
+        // 1. Update SSL VPN if role is enabled
+        if (!empty($roles['vpn_ssl'])) {
+            $this->updateSslVpnReference($automation, $newCertName);
         }
 
-        Log::info("Successfully created cert {$certName} on Fortigate at {$host}");
-
-        // Now update references. 
-        // For now we'll support SSL VPN settings. We could expand this to Admin GUI, etc.
-        $this->updateSslVpnReference($automation, $certName);
-
-        return true;
+        // 2. Update Admin GUI if role is enabled
+        if (!empty($roles['web_ui'])) {
+            $this->updateAdminGuiReference($automation, $newCertName);
+        }
     }
 
     /**
@@ -57,7 +97,7 @@ class FortigateService
     {
         $host = $automation->hostname;
         $token = $automation->getDecryptedPassword();
-        $url = "https://{$host}/api/v2/cmdb/vpn.ssl/settings?vdom=root";
+        $url = "https://{$host}/api/v2/cmdb/vpn.ssl/settings/?vdom=root";
 
         $response = Http::withoutVerifying()
             ->withHeaders(['Authorization' => "Bearer {$token}"])
@@ -67,10 +107,30 @@ class FortigateService
 
         if (!$response->successful()) {
             Log::error("Failed to update Fortigate SSL VPN reference: " . $response->body());
-            // We don't throw here to avoid failing the whole deployment if just the reference fails
-            // but we should probably log it clearly.
         } else {
             Log::info("Successfully updated Fortigate SSL VPN reference to {$certName}");
+        }
+    }
+
+    /**
+     * Update System Global Admin GUI certificate.
+     */
+    protected function updateAdminGuiReference(Automation $automation, string $certName)
+    {
+        $host = $automation->hostname;
+        $token = $automation->getDecryptedPassword();
+        $url = "https://{$host}/api/v2/cmdb/system/global/?vdom=root";
+
+        $response = Http::withoutVerifying()
+            ->withHeaders(['Authorization' => "Bearer {$token}"])
+            ->put($url, [
+                'admin-server-cert' => $certName
+            ]);
+
+        if (!$response->successful()) {
+            Log::error("Failed to update Fortigate Admin GUI reference: " . $response->body());
+        } else {
+            Log::info("Successfully updated Fortigate Admin GUI reference to {$certName}");
         }
     }
 
@@ -81,7 +141,7 @@ class FortigateService
     {
         $host = $automation->hostname;
         $token = $automation->getDecryptedPassword();
-        $url = "https://{$host}/api/v2/cmdb/certificate/local";
+        $url = "https://{$host}/api/v2/cmdb/certificate/local/?vdom=root";
 
         $response = Http::withoutVerifying()
             ->withHeaders(['Authorization' => "Bearer {$token}"])
@@ -102,7 +162,7 @@ class FortigateService
     {
         $host = $automation->hostname;
         $token = $automation->getDecryptedPassword();
-        $url = "https://{$host}/api/v2/cmdb/certificate/local/" . urlencode($certName);
+        $url = "https://{$host}/api/v2/cmdb/certificate/local/" . urlencode($certName) . "/?vdom=root";
 
         $response = Http::withoutVerifying()
             ->withHeaders(['Authorization' => "Bearer {$token}"])

@@ -41,7 +41,15 @@
                     <td style="padding: 12px 15px;">{{ $auto->hostname }}</td>
                     <td style="padding: 12px 15px; font-family: monospace; font-size: 0.8rem;">
                         @if($auto->type === 'kemp')
-                            Cert Name: auto_{{ str_replace('*', 'wildcard', $auto->domain->name) }}
+                            Cert Name: auto_{{ str_replace('*', 'wildcard', str_replace('.', '_', $auto->domain->name)) }}
+                        @elseif($auto->type === 'fortigate')
+                            Roles: 
+                            @php
+                                $roles = [];
+                                if(isset($auto->config['roles']['vpn_ssl']) && $auto->config['roles']['vpn_ssl']) $roles[] = 'SSL-VPN';
+                                if(isset($auto->config['roles']['web_ui']) && $auto->config['roles']['web_ui']) $roles[] = 'WebUI';
+                                echo !empty($roles) ? implode(', ', $roles) : 'None';
+                            @endphp
                         @else
                             -
                         @endif
@@ -52,6 +60,7 @@
                                 @csrf
                                 <button type="submit" class="btn btn-sm btn-primary" onclick="return confirm('Upload and REPLACE certificate on device now?')">Run Now</button>
                             </form>
+                            <button type="button" class="btn btn-sm" style="background: #f39c12; color: white;" onclick="openEditModal({{ $auto->id }})">Edit</button>
                             <form action="{{ route('automations.destroy', $auto->id) }}" method="POST">
                                 @csrf
                                 @method('DELETE')
@@ -70,7 +79,7 @@
     </table>
 </div>
 
-<!-- Modal Overhaul -->
+<!-- Modal -->
 <div id="add-automation-modal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:white; padding:30px; box-shadow:0 0 20px rgba(0,0,0,0.5); z-index:1001; border-radius:8px; width:500px; max-height: 90vh; overflow-y: auto;">
     <h3 id="modal-title">Add New Automation</h3>
     
@@ -81,6 +90,7 @@
 
     <form id="automation-form" action="{{ route('automations.store') }}" method="POST">
         @csrf
+        <div id="method-container"></div>
         
         <!-- STEP 1: Device Configuration -->
         <div id="step-1">
@@ -141,6 +151,32 @@
                 <input type="hidden" name="config[mode]" value="auto_prefix">
             </div>
 
+            <div id="fortigate-settings" style="display: none; background: #f8f9fa; padding: 15px; border-radius: 4px; margin-bottom: 15px; border-left: 4px solid #e67e22;">
+                <h5 style="margin-top: 0; margin-bottom: 10px;">Fortigate Roles</h5>
+                <p style="font-size: 0.8rem; color: #666; margin-bottom: 10px;">Select which services should use the new certificate:</p>
+                
+                <div style="margin-bottom: 8px;">
+                    <label style="display: flex; align-items: center; cursor: pointer; font-size: 0.9rem;">
+                        <input type="checkbox" name="config[roles][vpn_ssl]" value="1" id="role_vpn_ssl" checked style="margin-right: 10px;">
+                        SSL VPN Settings (servercert)
+                    </label>
+                </div>
+                
+                <div style="margin-bottom: 8px;">
+                    <label style="display: flex; align-items: center; cursor: pointer; font-size: 0.9rem;">
+                        <input type="checkbox" name="config[roles][web_ui]" value="1" id="role_web_ui" style="margin-right: 10px;">
+                        Admin Web UI (admin-server-cert)
+                    </label>
+                </div>
+
+                <div style="margin-bottom: 8px;">
+                    <label style="display: flex; align-items: center; cursor: pointer; font-size: 0.9rem; color: #888;">
+                        <input type="checkbox" name="config[roles][ssl_decryption]" value="1" id="role_ssl_decryption" disabled style="margin-right: 10px;">
+                        SSL Decryption / Deep Inspection (Coming Soon)
+                    </label>
+                </div>
+            </div>
+
             <div id="generic-settings" style="display: none; background: #f8f9fa; padding: 15px; border-radius: 4px; margin-bottom: 15px; border-left: 4px solid #95a5a6;">
                 <p style="font-size: 0.85rem; color: #666; margin: 0;">Additional configuration for this manufacturer will be available in a future update.</p>
                 <input type="hidden" name="config[mode]" value="default">
@@ -156,10 +192,56 @@
 
 <script>
     let connectionTested = false;
+    let editMode = false;
 
     function openAddModal() {
+        editMode = false;
+        document.getElementById('modal-title').innerText = 'Add New Automation';
+        document.getElementById('automation-form').action = '{{ route('automations.store') }}';
+        document.getElementById('method-container').innerHTML = '';
+        document.getElementById('password').required = true;
+        document.getElementById('password-hint').innerText = "For Kemp, ensure the API Key has permissions to 'addcert' and 'listcert'.";
+        
         document.getElementById('add-automation-modal').style.display = 'block';
         goToStep(1);
+    }
+
+    async function openEditModal(id) {
+        editMode = true;
+        document.getElementById('modal-title').innerText = 'Edit Automation';
+        document.getElementById('automation-form').action = `/automations/${id}`;
+        document.getElementById('method-container').innerHTML = '<input type="hidden" name="_method" value="PUT">';
+        document.getElementById('password').required = false;
+        document.getElementById('password-hint').innerText = "Leave blank to keep current password.";
+
+        document.getElementById('add-automation-modal').style.display = 'block';
+        
+        try {
+            const response = await fetch(`/automations/${id}`);
+            const data = await response.json();
+            
+            if (data.success) {
+                const auto = data.automation;
+                document.getElementById('device_type').value = auto.type;
+                document.getElementById('hostname').value = auto.hostname;
+                document.getElementById('domain_id').value = auto.domain_id;
+                
+                // Reset checkboxes
+                document.getElementById('role_vpn_ssl').checked = false;
+                document.getElementById('role_web_ui').checked = false;
+
+                if (auto.type === 'fortigate' && auto.config && auto.config.roles) {
+                    document.getElementById('role_vpn_ssl').checked = !!auto.config.roles.vpn_ssl;
+                    document.getElementById('role_web_ui').checked = !!auto.config.roles.web_ui;
+                }
+
+                connectionTested = true;
+                document.getElementById('btn-to-step-2').disabled = false;
+                goToStep(1);
+            }
+        } catch (error) {
+            alert('Error fetching automation data');
+        }
     }
 
     function closeModal() {
@@ -188,21 +270,18 @@
         const type = document.getElementById('device_type').value;
         const domainSelect = document.getElementById('domain_id');
         
+        document.getElementById('kemp-settings').style.display = type === 'kemp' ? 'block' : 'none';
+        document.getElementById('fortigate-settings').style.display = type === 'fortigate' ? 'block' : 'none';
+        document.getElementById('generic-settings').style.display = (type !== 'kemp' && type !== 'fortigate') ? 'block' : 'none';
+
         if (domainSelect.selectedIndex > 0) {
             const domainName = domainSelect.options[domainSelect.selectedIndex].text;
-            document.getElementById('kemp-settings').style.display = type === 'kemp' ? 'block' : 'none';
-            document.getElementById('generic-settings').style.display = type !== 'kemp' ? 'block' : 'none';
-            
             if (type === 'kemp') {
                 document.getElementById('kemp-cert-name').innerText = 'auto_' + domainName.replace('*', 'wildcard').replace(/\./g, '_');
             }
-        } else {
-            document.getElementById('kemp-settings').style.display = 'none';
-            document.getElementById('generic-settings').style.display = 'none';
         }
     }
 
-    // Domain selection change -> Check if cert exists on device
     document.getElementById('domain_id').addEventListener('change', async function() {
         updateStep2UI();
         
@@ -216,8 +295,6 @@
         if (!domainId) return;
 
         checkDiv.style.display = 'block';
-        checkDiv.style.background = '#f8f9fa';
-        checkDiv.style.color = '#666';
         checkDiv.innerHTML = '<em>Checking device for existing certificate...</em>';
         saveBtn.disabled = true;
 
@@ -232,29 +309,10 @@
             });
 
             const data = await response.json();
-
-            if (data.success) {
-                if (data.exists) {
-                    checkDiv.style.background = '#fff3cd';
-                    checkDiv.style.color = '#856404';
-                    checkDiv.style.border = '1px solid #ffeeba';
-                    checkDiv.innerHTML = `<strong>Notice:</strong> ${data.message}`;
-                } else {
-                    checkDiv.style.background = '#d1ecf1';
-                    checkDiv.style.color = '#0c5460';
-                    checkDiv.style.border = '1px solid #bee5eb';
-                    checkDiv.innerHTML = `<strong>Info:</strong> ${data.message}`;
-                }
-                saveBtn.disabled = false;
-            } else {
-                checkDiv.style.background = '#f8d7da';
-                checkDiv.style.color = '#721c24';
-                checkDiv.style.border = '1px solid #f5c6cb';
-                checkDiv.innerHTML = `<strong>Check Failed:</strong> ${data.message}`;
-                saveBtn.disabled = false; // Allow saving anyway? Or block? Let's allow but warned.
-            }
+            checkDiv.innerHTML = data.message;
+            saveBtn.disabled = false;
         } catch (error) {
-            checkDiv.innerHTML = 'Error checking certificate: ' + error.message;
+            checkDiv.innerHTML = 'Error checking certificate';
             saveBtn.disabled = false;
         }
     });
@@ -262,21 +320,13 @@
     document.getElementById('device_type').addEventListener('change', function() {
         const type = this.value;
         const label = document.getElementById('password-label');
-        const hint = document.getElementById('password-hint');
-        
         if (type === 'kemp') {
             label.innerText = 'API Key';
-            hint.innerText = "For Kemp, ensure the API Key has permissions to 'addcert' and 'listcert'.";
         } else {
             label.innerText = 'API Key / Password';
-            hint.innerText = "Enter the administrative password or API key for the device.";
         }
-        
-        // Reset test if type changes
         connectionTested = false;
         document.getElementById('btn-to-step-2').disabled = true;
-        document.getElementById('test-result').style.display = 'none';
-        document.getElementById('check-result').style.display = 'none';
     });
 
     async function testConnection() {
@@ -286,14 +336,8 @@
         const hostname = document.getElementById('hostname').value;
         const password = document.getElementById('password').value;
 
-        if (!hostname || !password) {
-            alert('Please enter hostname and API Key/Password');
-            return;
-        }
-
         btn.disabled = true;
         btn.innerText = 'Testing...';
-        resultDiv.style.display = 'none';
 
         try {
             const response = await fetch('{{ route('automations.test') }}', {
@@ -306,30 +350,16 @@
             });
 
             const data = await response.json();
-
             resultDiv.style.display = 'block';
+            resultDiv.innerHTML = data.message;
+            
             if (data.success) {
-                resultDiv.style.background = '#d4edda';
-                resultDiv.style.color = '#155724';
-                resultDiv.style.border = '1px solid #c3e6cb';
-                resultDiv.innerHTML = `<strong>Success!</strong> ${data.message}<br>Found ${data.count} existing certificates.`;
                 connectionTested = true;
                 document.getElementById('btn-to-step-2').disabled = false;
-            } else {
-                resultDiv.style.background = '#f8d7da';
-                resultDiv.style.color = '#721c24';
-                resultDiv.style.border = '1px solid #f5c6cb';
-                resultDiv.innerHTML = `<strong>Failed:</strong> ${data.message}`;
-                connectionTested = false;
-                document.getElementById('btn-to-step-2').disabled = true;
             }
         } catch (error) {
             resultDiv.style.display = 'block';
-            resultDiv.style.background = '#f8d7da';
-            resultDiv.style.color = '#721c24';
-            resultDiv.style.border = '1px solid #f5c6cb';
-            resultDiv.innerText = 'Error: ' + error.message;
-            connectionTested = false;
+            resultDiv.innerHTML = 'Connection failed';
         } finally {
             btn.disabled = false;
             btn.innerText = 'Test Connection';

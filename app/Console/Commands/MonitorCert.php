@@ -94,50 +94,87 @@ class MonitorCert extends Command
             ->get();
 
         $changes = [];
+        $expiryAlerts = [];
+
+        $yellowThreshold = (int) (Setting::where('key', 'expiry_yellow')->value('value') ?? 30);
+        $redThreshold = (int) (Setting::where('key', 'expiry_red')->value('value') ?? 10);
 
         foreach ($newLogs as $newLog) {
-            // Find the previous log for this domain and IP
+            // Check for thumbprint/error changes
             $oldLog = CertHealthLog::where('domain_id', $newLog->domain_id)
                 ->where('ip_address', $newLog->ip_address)
                 ->where('id', '<', $newLog->id)
                 ->latest()
                 ->first();
 
-            if (!$oldLog) {
-                // First time check, we can consider it a "change" if it's an error?
-                // Or maybe just skip. User said "when certificate changes are detected".
-                // Let's only alert on changes from a previous state.
-                continue;
+            if ($oldLog) {
+                $hasChange = false;
+                if ($newLog->thumbprint_sha256 !== $oldLog->thumbprint_sha256) {
+                    $hasChange = true;
+                }
+                if ($newLog->error !== $oldLog->error) {
+                    $hasChange = true;
+                }
+
+                if ($hasChange) {
+                    $changes[] = [
+                        'domain' => $newLog->domain,
+                        'ip' => $newLog->ip_address,
+                        'old' => $oldLog->toArray(),
+                        'new' => $newLog->toArray(),
+                    ];
+                }
             }
 
-            $hasChange = false;
-            
-            // Check for thumbprint change
-            if ($newLog->thumbprint_sha256 !== $oldLog->thumbprint_sha256) {
-                $hasChange = true;
-            }
-            
-            // Check for error status change
-            if ($newLog->error !== $oldLog->error) {
-                $hasChange = true;
-            }
+            // Check for expiry alerts
+            if ($newLog->expiry_date) {
+                $days = (int) ceil(now()->diffInDays($newLog->expiry_date, false));
+                $domain = $newLog->domain;
+                $thumbprint = $newLog->thumbprint_sha256 ?? 'no_thumb';
+                
+                // We use a cache key to track if we've already alerted for this specific threshold today
+                // Key format: expiry_alert_{domain_id}_{thumbprint}_{threshold_type}_{date}
+                
+                $shouldAlert = false;
+                $reason = "";
+                $thresholdType = null;
 
-            if ($hasChange) {
-                $changes[] = [
-                    'domain' => $newLog->domain,
-                    'ip' => $newLog->ip_address,
-                    'old' => $oldLog->toArray(),
-                    'new' => $newLog->toArray(),
-                ];
+                if ($days == $yellowThreshold) {
+                    $shouldAlert = true;
+                    $reason = "Certificate matches Yellow threshold ($yellowThreshold days).";
+                    $thresholdType = "yellow";
+                } elseif ($days == $redThreshold) {
+                    $shouldAlert = true;
+                    $reason = "Certificate matches Critical threshold ($redThreshold days).";
+                    $thresholdType = "critical";
+                } elseif ($days < $redThreshold) {
+                    $shouldAlert = true;
+                    $reason = "Certificate is BELOW Critical threshold ($days days remaining).";
+                    $thresholdType = "below_red";
+                }
+
+                if ($shouldAlert) {
+                    $cacheKey = "expiry_alert_{$domain->id}_" . substr($thumbprint, 0, 8) . "_{$thresholdType}_" . now()->toDateString();
+                    if (!\Illuminate\Support\Facades\Cache::has($cacheKey)) {
+                        $expiryAlerts[] = [
+                            'domain' => $domain,
+                            'ip' => $newLog->ip_address,
+                            'days' => $days,
+                            'expiry' => $newLog->expiry_date->format('Y-m-d'),
+                            'reason' => $reason,
+                        ];
+                        \Illuminate\Support\Facades\Cache::put($cacheKey, true, now()->endOfDay());
+                    }
+                }
             }
         }
 
-        if (empty($changes)) {
+        if (empty($changes) && empty($expiryAlerts)) {
             return;
         }
 
         try {
-            Mail::to($recipients)->send(new CertHealthReport($changes));
+            Mail::to($recipients)->send(new CertHealthReport($changes, $expiryAlerts));
             $this->info("Notification email sent to " . implode(', ', $recipients));
         } catch (\Exception $e) {
             $this->error("Failed to send Certificate notification: " . $e->getMessage());

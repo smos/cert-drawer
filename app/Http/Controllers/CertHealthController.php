@@ -38,6 +38,43 @@ class CertHealthController extends Controller
             
             // Any errors?
             $domain->has_errors = $latestLogs->whereNotNull('error')->count() > 0;
+
+            // Expiry health calculation
+            $settings = \App\Models\Setting::all()->pluck('value', 'key');
+            $yellow = (int) ($settings['expiry_yellow'] ?? 30);
+            $orange = (int) ($settings['expiry_orange'] ?? 20);
+            $red = (int) ($settings['expiry_red'] ?? 10);
+
+            $minDays = null;
+            foreach ($latestLogs as $log) {
+                if ($log->expiry_date) {
+                    $days = (int) ceil(now()->diffInDays($log->expiry_date, false));
+                    if ($minDays === null || $days < $minDays) {
+                        $minDays = $days;
+                    }
+                }
+            }
+
+            $domain->min_days = $minDays;
+            if ($domain->has_errors) {
+                $domain->health_status = 'critical';
+            } elseif ($domain->mismatch) {
+                $domain->health_status = 'urgent';
+            } elseif ($minDays !== null) {
+                if ($minDays <= 0) {
+                    $domain->health_status = 'expired';
+                } elseif ($minDays <= $red) {
+                    $domain->health_status = 'critical';
+                } elseif ($minDays <= $orange) {
+                    $domain->health_status = 'urgent';
+                } elseif ($minDays <= $yellow) {
+                    $domain->health_status = 'warning';
+                } else {
+                    $domain->health_status = 'healthy';
+                }
+            } else {
+                $domain->health_status = $latestLogs->isEmpty() ? 'none' : 'healthy';
+            }
         }
 
         return view('cert_health.index', compact('domains'));

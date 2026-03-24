@@ -11,10 +11,20 @@ class CertHealthReport extends Mailable
     use Queueable, SerializesModels;
 
     public array $changes;
+    public array $expiryAlerts;
+    public array $thresholds;
 
-    public function __construct(array $changes)
+    public function __construct(array $changes, array $expiryAlerts = [])
     {
         $this->changes = $changes;
+        $this->expiryAlerts = $expiryAlerts;
+
+        $settings = \App\Models\Setting::all()->pluck('value', 'key');
+        $this->thresholds = [
+            'yellow' => (int) ($settings['expiry_yellow'] ?? 30),
+            'orange' => (int) ($settings['expiry_orange'] ?? 20),
+            'red'    => (int) ($settings['expiry_red'] ?? 10),
+        ];
     }
 
     public function build()

@@ -152,6 +152,41 @@ class AutomationController extends Controller
         return redirect()->route('automations.index')->with('success', 'Automation created successfully.');
     }
 
+    public function show(Automation $automation)
+    {
+        return response()->json([
+            'success' => true,
+            'automation' => [
+                'id' => $automation->id,
+                'domain_id' => $automation->domain_id,
+                'type' => $automation->type,
+                'hostname' => $automation->hostname,
+                'config' => $automation->config,
+                // We don't send the password back for security, even encrypted
+            ]
+        ]);
+    }
+
+    public function update(Request $request, Automation $automation)
+    {
+        $validated = $request->validate([
+            'domain_id' => ['required', 'exists:domains,id'],
+            'type' => ['required', 'in:kemp,fortigate,paloalto'],
+            'hostname' => ['required', 'string', 'max:255'],
+            'password' => ['nullable', 'string'], // Password optional on update
+            'config' => ['required', 'array'],
+        ]);
+
+        if (empty($validated['password'])) {
+            unset($validated['password']);
+        }
+
+        $automation->update($validated);
+        AuditLog::log('automation_update', "Updated {$automation->type} automation for: {$automation->domain->name}");
+
+        return redirect()->route('automations.index')->with('success', 'Automation updated successfully.');
+    }
+
     public function run(Automation $automation)
     {
         $latestCert = $automation->domain->certificates()->where('status', 'issued')->latest()->first();

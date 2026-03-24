@@ -79,6 +79,8 @@ Route::middleware('auth')->group(function () {
     Route::middleware('admin:automations')->group(function () {
         Route::get('/automations', [\App\Http\Controllers\AutomationController::class, 'index'])->name('automations.index');
         Route::post('/automations', [\App\Http\Controllers\AutomationController::class, 'store'])->name('automations.store');
+        Route::get('/automations/{automation}', [\App\Http\Controllers\AutomationController::class, 'show'])->name('automations.show');
+        Route::put('/automations/{automation}', [\App\Http\Controllers\AutomationController::class, 'update'])->name('automations.update');
         Route::post('/automations/test', [\App\Http\Controllers\AutomationController::class, 'testConnection'])->name('automations.test');
         Route::post('/automations/check-cert', [\App\Http\Controllers\AutomationController::class, 'checkCertificate'])->name('automations.check-cert');
         Route::post('/automations/{automation}/run', [\App\Http\Controllers\AutomationController::class, 'run'])->name('automations.run');

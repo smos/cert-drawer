@@ -42,13 +42,25 @@
                         @endif
                     </td>
                     <td style="padding: 10px;">
-                        @if($domain->mismatch || $domain->has_errors)
-                            <span class="tag" style="background: #e67e22; color: white;">Warning</span>
-                        @elseif($domain->health_logs->isEmpty())
-                            <span class="tag" style="background: #95a5a6; color: white;">No Data</span>
-                        @else
-                            <span class="tag" style="background: #27ae60; color: white;">Healthy</span>
-                        @endif
+                        @switch($domain->health_status)
+                            @case('expired')
+                                <span class="tag" style="background: #e74c3c; color: white;">Expired</span>
+                                @break
+                            @case('critical')
+                                <span class="tag" style="background: #c0392b; color: white;">Critical</span>
+                                @break
+                            @case('urgent')
+                                <span class="tag" style="background: #e67e22; color: white;">Urgent</span>
+                                @break
+                            @case('warning')
+                                <span class="tag" style="background: #f1c40f; color: black;">Warning</span>
+                                @break
+                            @case('healthy')
+                                <span class="tag" style="background: #27ae60; color: white;">Healthy</span>
+                                @break
+                            @default
+                                <span class="tag" style="background: #95a5a6; color: white;">No Data</span>
+                        @endswitch
                     </td>
                     <td style="padding: 10px;">
                         <div style="display: flex; flex-direction: column; gap: 5px;">
