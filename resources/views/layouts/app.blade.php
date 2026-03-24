@@ -475,6 +475,12 @@
                             </div>
                             <div class="collapsible">
                                 <p>Status: <span class="tag">${c.status}</span></p>
+                                <p>Used Root CA: <span style="font-weight: 600; color: #34495e;">${c.root_ca_name || 'N/A'}</span></p>
+                                ${c.chain_incomplete ? `
+                                    <div style="background: #fff3cd; color: #856404; border: 1px solid #ffeeba; padding: 8px; border-radius: 4px; font-size: 0.8rem; margin: 10px 0;">
+                                        ⚠️ <strong>Incomplete Chain:</strong> Root CA or intermediate is missing from Authorities.
+                                    </div>
+                                ` : ''}
                                 <p>Issuer: ${c.issuer || 'N/A'}</p>
                                 <p>Import Date: ${new Date(c.created_at).toLocaleString()}</p>
                                 <div class="actions" style="margin-top:10px">

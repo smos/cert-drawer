@@ -347,4 +347,39 @@ subjectAltName = @alt_names
         
         return hash($algo, $data);
     }
+
+    public function extractSubjectKeyIdentifier(string $certPem)
+    {
+        $info = $this->getCertInfo($certPem);
+        $skid = $info['extensions']['subjectKeyIdentifier'] ?? null;
+        if ($skid) {
+            return strtolower(str_replace([':', ' '], '', $skid));
+        }
+        return null;
+    }
+
+    public function extractAuthorityKeyIdentifier(string $certPem)
+    {
+        $info = $this->getCertInfo($certPem);
+        $akid = $info['extensions']['authorityKeyIdentifier'] ?? null;
+        if ($akid) {
+            // Usually looks like "keyid:XX:XX..."
+            if (preg_match('/keyid:([0-9A-Fa-f: ]+)/', $akid, $matches)) {
+                return strtolower(str_replace([':', ' '], '', $matches[1]));
+            }
+        }
+        return null;
+    }
+
+    public function extractFullSubjectDn(string $certPem)
+    {
+        $info = $this->getCertInfo($certPem);
+        return $info ? json_encode($info['subject']) : null;
+    }
+
+    public function extractFullIssuerDn(string $certPem)
+    {
+        $info = $this->getCertInfo($certPem);
+        return $info ? json_encode($info['issuer']) : null;
+    }
 }

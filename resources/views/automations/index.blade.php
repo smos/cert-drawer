@@ -50,6 +50,8 @@
                                 if(isset($auto->config['roles']['web_ui']) && $auto->config['roles']['web_ui']) $roles[] = 'WebUI';
                                 echo !empty($roles) ? implode(', ', $roles) : 'None';
                             @endphp
+                        @elseif($auto->type === 'paloalto')
+                            Profiles: {{ $auto->config['profiles_string'] ?? 'None' }}
                         @else
                             -
                         @endif
@@ -177,6 +179,17 @@
                 </div>
             </div>
 
+            <div id="paloalto-settings" style="display: none; background: #f8f9fa; padding: 15px; border-radius: 4px; margin-bottom: 15px; border-left: 4px solid #34495e;">
+                <h5 style="margin-top: 0; margin-bottom: 10px;">Palo Alto Configuration</h5>
+                <p style="font-size: 0.8rem; color: #666; margin-bottom: 10px;">The certificate will be imported to the shared certificate store.</p>
+                
+                <div style="margin-bottom: 10px;">
+                    <label style="font-weight: 600; font-size: 0.85rem;">SSL/TLS Service Profiles to Update</label><br>
+                    <p style="font-size: 0.75rem; color: #888; margin-bottom: 5px;">Comma-separated list of profile names (e.g., GP-Portal, Management-Profile)</p>
+                    <input type="text" name="config[profiles_string]" id="pa_profiles" placeholder="Profile-1, Profile-2" style="width:100%; padding:8px; border:1px solid #ddd; font-size: 0.9rem;">
+                </div>
+            </div>
+
             <div id="generic-settings" style="display: none; background: #f8f9fa; padding: 15px; border-radius: 4px; margin-bottom: 15px; border-left: 4px solid #95a5a6;">
                 <p style="font-size: 0.85rem; color: #666; margin: 0;">Additional configuration for this manufacturer will be available in a future update.</p>
                 <input type="hidden" name="config[mode]" value="default">
@@ -235,6 +248,10 @@
                     document.getElementById('role_web_ui').checked = !!auto.config.roles.web_ui;
                 }
 
+                if (auto.type === 'paloalto' && auto.config) {
+                    document.getElementById('pa_profiles').value = auto.config.profiles_string || '';
+                }
+
                 connectionTested = true;
                 document.getElementById('btn-to-step-2').disabled = false;
                 goToStep(1);
@@ -272,7 +289,8 @@
         
         document.getElementById('kemp-settings').style.display = type === 'kemp' ? 'block' : 'none';
         document.getElementById('fortigate-settings').style.display = type === 'fortigate' ? 'block' : 'none';
-        document.getElementById('generic-settings').style.display = (type !== 'kemp' && type !== 'fortigate') ? 'block' : 'none';
+        document.getElementById('paloalto-settings').style.display = type === 'paloalto' ? 'block' : 'none';
+        document.getElementById('generic-settings').style.display = (type !== 'kemp' && type !== 'fortigate' && type !== 'paloalto') ? 'block' : 'none';
 
         if (domainSelect.selectedIndex > 0) {
             const domainName = domainSelect.options[domainSelect.selectedIndex].text;

@@ -3,11 +3,14 @@
 namespace App\Http\Controllers;
 
 use App\Models\Domain;
-use App\Models\AuditLog;
 use App\Models\Certificate;
+use App\Models\AuditLog;
+use App\Models\Setting;
 use App\Services\CertificateService;
+use App\Services\CertHealthService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 
 class DomainController extends Controller
 {
@@ -27,30 +30,27 @@ class DomainController extends Controller
 
     public function index(Request $request)
     {
-        return $this->handleIndex($request, false);
+        return $this->listDomains($request, false);
     }
 
     public function caIndex(Request $request)
     {
-        return $this->handleIndex($request, true);
+        return $this->listDomains($request, true);
     }
 
-    protected function handleIndex(Request $request, bool $isCa)
+    protected function listDomains(Request $request, $isCa = false)
     {
-        $search = $request->input('search');
         $user = Auth::user();
-        $showDisabled = $request->boolean('show_disabled', false);
-
         $query = Domain::query();
 
         if ($isCa) {
-            // In CA view, only show domains that HAVE at least one CA certificate
             $query->whereHas('certificates', function($q) {
                 $q->where('is_ca', true);
             });
         } else {
-            // In normal view, show domains that have NO CA certificates 
-            // OR have no certificates at all (new domains)
+            if (!$request->has('show_disabled') || !$request->input('show_disabled')) {
+                $query->where('is_enabled', true);
+            }
             $query->where(function($q) {
                 $q->whereDoesntHave('certificates', function($sq) {
                     $sq->where('is_ca', true);
@@ -58,15 +58,7 @@ class DomainController extends Controller
             });
         }
 
-        $query->with(['tags', 'certificates' => function($q) use ($isCa) {
-            $q->where('is_ca', $isCa)->where('status', 'issued')->whereNotNull('expiry_date')->orderByDesc('expiry_date');
-        }]);
-
-        if (!$showDisabled) {
-            $query->where('is_enabled', true);
-        }
-
-        if ($search) {
+        if ($search = $request->input('search')) {
             $query->where(function($q) use ($search) {
                 $q->where('name', 'like', "%{$search}%")
                   ->orWhereHas('tags', function($q) use ($search) {
@@ -81,7 +73,7 @@ class DomainController extends Controller
 
         $domains = $query->orderBy('name')->get();
 
-        $settings = \App\Models\Setting::all()->pluck('value', 'key');
+        $settings = Setting::all()->pluck('value', 'key');
         $yellow = (int) ($settings['expiry_yellow'] ?? 30);
         $orange = (int) ($settings['expiry_orange'] ?? 20);
         $red = (int) ($settings['expiry_red'] ?? 10);
@@ -102,7 +94,7 @@ class DomainController extends Controller
             }
 
             if ($latestCert && $latestCert->expiry_date) {
-                $days = now()->diffInDays($latestCert->expiry_date, false);
+                $days = (int) ceil(now()->diffInDays($latestCert->expiry_date, false));
                 $domain->latest_expiry = $latestCert->expiry_date->format('Y-m-d');
                 $domain->expiry_human = $latestCert->expiry_date->diffForHumans(['parts' => 2, 'join' => true]);
                 
@@ -176,18 +168,85 @@ class DomainController extends Controller
             $query->orderByRaw('expiry_date DESC NULLS LAST')->orderBy('created_at', 'desc');
         }, 'tags']);
 
-        // Enrich certificates with valid_from for history view
+        // Rebuild authority tree for all CAs and link domain certs
+        $this->rebuildAuthorityTree();
+
+        $allCas = Certificate::where('is_ca', true)->whereNotNull('certificate')->get();
+
+        // Enrich certificates and follow chain for the drawer view
         foreach ($domain->certificates as $cert) {
             if ($cert->certificate) {
                 $info = $this->certService->getCertInfo($cert->certificate);
                 $cert->valid_from = isset($info['validFrom_time_t']) ? date('Y-m-d', $info['validFrom_time_t']) : null;
                 $cert->expiry_fmt = $cert->expiry_date ? $cert->expiry_date->format('Y-m-d') : null;
+
+                // Attempt to link end-entity to its immediate issuer if not already linked
+                if (!$cert->issuer_certificate_id && !$cert->is_ca) {
+                    $issuer = $this->findIssuer($cert, $allCas);
+                    if ($issuer) {
+                        Certificate::where('id', $cert->id)->update(['issuer_certificate_id' => $issuer->id]);
+                        $cert->issuer_certificate_id = $issuer->id;
+                    }
+                }
+
+                // Follow chain to find the top-most CA and check if it's a proper root
+                $curr = $cert;
+                $safety = 0;
+                $chainComplete = false;
+                $rootCa = null;
+
+                while ($curr && $curr->issuer_certificate_id && $safety < 20) {
+                    $safety++;
+                    $issuerCert = $allCas->where('id', $curr->issuer_certificate_id)->first() ?? Certificate::find($curr->issuer_certificate_id);
+                    if ($issuerCert) {
+                        $rootCa = $issuerCert;
+                        $curr = $issuerCert;
+                        
+                        // Check if this issuer is self-signed (Root)
+                        $akid = $this->certService->extractAuthorityKeyIdentifier($curr->certificate);
+                        $skid = $this->certService->extractSubjectKeyIdentifier($curr->certificate);
+                        if ($akid && $skid) {
+                            if ($akid === $skid) {
+                                $chainComplete = true;
+                                break;
+                            }
+                        } else {
+                            // Fallback to Name matching if no SKID/AKID
+                            $sub = $this->certService->extractFullSubjectDn($curr->certificate);
+                            $iss = $this->certService->extractFullIssuerDn($curr->certificate);
+                            if ($sub === $iss) {
+                                $chainComplete = true;
+                                break;
+                            }
+                        }
+                    } else {
+                        break;
+                    }
+                }
+
+                $cert->root_ca_name = $rootCa ? ($rootCa->issuer ?? $rootCa->domain->name) : $cert->issuer;
+                $cert->chain_incomplete = !$chainComplete;
+                
+                // If it's a self-signed CA itself, it's complete
+                if ($cert->is_ca) {
+                    $akid = $this->certService->extractAuthorityKeyIdentifier($cert->certificate);
+                    $skid = $this->certService->extractSubjectKeyIdentifier($cert->certificate);
+                    if ($akid && $skid && $akid === $skid) {
+                        $cert->chain_incomplete = false;
+                    } else {
+                        $sub = $this->certService->extractFullSubjectDn($cert->certificate);
+                        $iss = $this->certService->extractFullIssuerDn($cert->certificate);
+                        if ($sub === $iss) {
+                            $cert->chain_incomplete = false;
+                        }
+                    }
+                }
             }
         }
 
-        $settings = \App\Models\Setting::all()->pluck('value', 'key');
+        $settings = Setting::all()->pluck('value', 'key');
         $globalAllowedGroups = json_decode($settings['ldap_allowed_groups'] ?? '[]', true);
-        
+
         $isAdmin = empty(Auth::user()->guid) || Auth::user()->canAccessDomainManagement();
         $isCaDomain = $domain->certificates->where('is_ca', true)->count() > 0;
 
@@ -197,6 +256,40 @@ class DomainController extends Controller
             'is_admin' => $isAdmin,
             'is_ca_domain' => $isCaDomain
         ]);
+    }
+
+    protected function findIssuer($cert, $cas)
+    {
+        $akid = $this->certService->extractAuthorityKeyIdentifier($cert->certificate);
+        if ($akid) {
+            $match = $cas->filter(function($ca) use ($akid) {
+                return $this->certService->extractSubjectKeyIdentifier($ca->certificate) === $akid;
+            })->first();
+            if ($match) return $match;
+        }
+
+        // Fallback to Full DN matching
+        $issuerDn = $this->certService->extractFullIssuerDn($cert->certificate);
+        return $cas->filter(function($ca) use ($issuerDn) {
+            return $this->certService->extractFullSubjectDn($ca->certificate) === $issuerDn;
+        })->first();
+    }
+
+    protected function rebuildAuthorityTree()
+    {
+        $allCas = Certificate::where('is_ca', true)->whereNotNull('certificate')->get();
+        
+        foreach ($allCas as $ca) {
+            // Re-evaluate issuer for every CA to handle newly imported roots
+            $issuer = $this->findIssuer($ca, $allCas);
+            
+            if ($issuer && $issuer->id !== $ca->id) {
+                if ($ca->issuer_certificate_id !== $issuer->id) {
+                    Certificate::where('id', $ca->id)->update(['issuer_certificate_id' => $issuer->id]);
+                    $ca->issuer_certificate_id = $issuer->id;
+                }
+            }
+        }
     }
 
     public function addTag(Request $request, Domain $domain)
@@ -225,28 +318,33 @@ class DomainController extends Controller
         return response()->json(['success' => true]);
     }
 
-    public function importCert(Request $request, \App\Services\CertificateService $certService)
+    public function importCert(Request $request)
     {
         $request->validate([
             'certificate_file' => 'required|file',
         ]);
 
         $certData = file_get_contents($request->file('certificate_file')->getRealPath());
-        $info = $certService->getCertInfo($certData);
+        $info = $this->certService->getCertInfo($certData);
 
         if (!$info) {
             return back()->withErrors(['error' => 'Failed to parse certificate file.']);
         }
 
+        $isCa = (isset($info['extensions']['basicConstraints']) && str_contains($info['extensions']['basicConstraints'], 'CA:TRUE'));
+        
         $cn = $info['subject']['commonName'] ?? $info['subject']['CN'] ?? null;
-        if (!$cn || !preg_match('#^(\*\.)?([a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+$#', $cn)) {
-            return back()->withErrors(['error' => 'Could not extract a valid Common Name from certificate.']);
+        if (is_array($cn)) $cn = $cn[0] ?? null;
+
+        // For CAs, allow a much broader name (spaces, etc.). For domains, keep it closer to hostname rules but still allow some flexibility.
+        $regex = $isCa ? '#^[a-zA-Z0-9- \._\(\),&]+$#' : '#^(\*\.)?([a-zA-Z0-9- \._]+\.)*[a-zA-Z0-9- \._]+$#';
+
+        if (!$cn || !preg_match($regex, $cn)) {
+            return back()->withErrors(['error' => 'Could not extract a valid Common Name from certificate. Current: ' . ($cn ?: 'None')]);
         }
 
         $domain = Domain::firstOrCreate(['name' => $cn]);
         
-        $isCa = (isset($info['extensions']['basicConstraints']) && str_contains($info['extensions']['basicConstraints'], 'CA:TRUE'));
-
         $certificate = $domain->certificates()->create([
             'request_type' => 'manual',
             'certificate' => $certData,
@@ -254,8 +352,8 @@ class DomainController extends Controller
             'expiry_date' => isset($info['validTo_time_t']) ? date('Y-m-d H:i:s', $info['validTo_time_t']) : null,
             'issuer' => $info['issuer']['CN'] ?? 'Unknown',
             'is_ca' => $isCa,
-            'thumbprint_sha1' => $certService->extractThumbprint($certData, 'sha1'),
-            'thumbprint_sha256' => $certService->extractThumbprint($certData, 'sha256'),
+            'thumbprint_sha1' => $this->certService->extractThumbprint($certData, 'sha1'),
+            'thumbprint_sha256' => $this->certService->extractThumbprint($certData, 'sha256'),
         ]);
 
         $path = "certificates/" . $domain->name . "/" . $certificate->created_at->format('Y-m-d_H-i-s');
@@ -263,11 +361,14 @@ class DomainController extends Controller
 
         AuditLog::log('cert_import', "Imported certificate for domain: {$cn}");
 
+        // Rebuild tree immediately after import
+        $this->rebuildAuthorityTree();
+
         $route = $isCa ? 'domains.authorities' : 'domains.index';
         return redirect()->route($route)->with('success', 'Certificate imported successfully.');
     }
 
-    public function importPfx(Request $request, \App\Services\CertificateService $certService)
+    public function importPfx(Request $request)
     {
         $request->validate([
             'pfx_file' => 'required|file',
@@ -277,14 +378,20 @@ class DomainController extends Controller
         $pfxData = file_get_contents($request->file('pfx_file')->getRealPath());
         
         try {
-            $res = $certService->parsePfx($pfxData, $request->input('password'));
+            $res = $this->certService->parsePfx($pfxData, $request->input('password'));
         } catch (\Exception $e) {
             return back()->withErrors(['error' => 'Failed to parse PFX. Ensure the password is correct.']);
         }
 
-        $cn = $res['info']['subject']['CN'] ?? null;
-        if (!$cn || !preg_match('#^(\*\.)?([a-zA-Z0-9-]+\.)*[a-zA-Z0-9-]+$#', $cn)) {
-            return back()->withErrors(['error' => 'Could not extract a valid Common Name from PFX.']);
+        $isCa = (isset($res['info']['extensions']['basicConstraints']) && str_contains($res['info']['extensions']['basicConstraints'], 'CA:TRUE'));
+
+        $cn = $res['info']['subject']['commonName'] ?? $res['info']['subject']['CN'] ?? null;
+        if (is_array($cn)) $cn = $cn[0] ?? null;
+
+        $regex = $isCa ? '#^[a-zA-Z0-9- \._\(\),&]+$#' : '#^(\*\.)?([a-zA-Z0-9- \._]+\.)*[a-zA-Z0-9- \._]+$#';
+
+        if (!$cn || !preg_match($regex, $cn)) {
+            return back()->withErrors(['error' => 'Could not extract a valid Common Name from PFX. Current: ' . ($cn ?: 'None')]);
         }
 
         $domain = Domain::firstOrCreate(['name' => $cn]);
@@ -296,8 +403,6 @@ class DomainController extends Controller
             }
         }
         
-        $isCa = (isset($res['info']['extensions']['basicConstraints']) && str_contains($res['info']['extensions']['basicConstraints'], 'CA:TRUE'));
-
         $certificate = $domain->certificates()->create([
             'request_type' => 'manual',
             'certificate' => $res['cert'],
@@ -307,19 +412,22 @@ class DomainController extends Controller
             'expiry_date' => isset($res['info']['validTo_time_t']) ? date('Y-m-d H:i:s', $res['info']['validTo_time_t']) : null,
             'issuer' => $res['info']['issuer']['CN'] ?? 'Unknown',
             'is_ca' => $isCa,
-            'thumbprint_sha1' => $certService->extractThumbprint($res['cert'], 'sha1'),
-            'thumbprint_sha256' => $certService->extractThumbprint($res['cert'], 'sha256'),
+            'thumbprint_sha1' => $this->certService->extractThumbprint($res['cert'], 'sha1'),
+            'thumbprint_sha256' => $this->certService->extractThumbprint($res['cert'], 'sha256'),
         ]);
 
         $path = "certificates/" . $domain->name . "/" . $certificate->created_at->format('Y-m-d_H-i-s');
         \Illuminate\Support\Facades\Storage::disk('local')->put($path . "/certificate.cer", $res['cert']);
         
         // Save ssl.conf template based on imported cert
-        $dn = $certService->extractDnFromCert($res['info']);
-        $sans = $certService->extractSansFromCert($res['info']);
-        $certService->saveSslConfig($path, $dn, $sans);
+        $dn = $this->certService->extractDnFromCert($res['info']);
+        $sans = $this->certService->extractSansFromCert($res['info']);
+        $this->certService->saveSslConfig($path, $dn, $sans);
 
         AuditLog::log('pfx_import', "Imported PFX for domain: {$cn}");
+
+        // Rebuild tree immediately after import
+        $this->rebuildAuthorityTree();
 
         $route = $isCa ? 'domains.authorities' : 'domains.index';
         return redirect()->route($route)->with('success', 'PFX imported successfully for ' . $cn);

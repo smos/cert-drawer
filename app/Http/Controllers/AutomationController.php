@@ -7,6 +7,7 @@ use App\Models\Domain;
 use App\Models\AuditLog;
 use App\Services\KempService;
 use App\Services\FortigateService;
+use App\Services\PaloAltoService;
 use Illuminate\Http\Request;
 
 class AutomationController extends Controller
@@ -50,6 +51,16 @@ class AutomationController extends Controller
                 return response()->json([
                     'success' => true,
                     'message' => 'Successfully connected to Fortigate!',
+                    'count' => count($certs),
+                    'certs' => $certs
+                ]);
+            }
+
+            if ($validated['type'] === 'paloalto') {
+                $certs = app(PaloAltoService::class)->listCerts($tempAuto);
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Successfully connected to Palo Alto!',
                     'count' => count($certs),
                     'certs' => $certs
                 ]);
@@ -129,6 +140,26 @@ class AutomationController extends Controller
                 ]);
             }
 
+            if ($validated['type'] === 'paloalto') {
+                $service = app(PaloAltoService::class);
+                $certs = $service->listCerts($tempAuto);
+                
+                $exists = false;
+                foreach ($certs as $c) {
+                    if (($c['name'] ?? '') === $certName) {
+                        $exists = true;
+                        break;
+                    }
+                }
+
+                return response()->json([
+                    'success' => true,
+                    'exists' => $exists,
+                    'cert_name' => $certName,
+                    'message' => $exists ? "Certificate '{$certName}' already exists on Palo Alto." : "Certificate '{$certName}' not found on Palo Alto. It will be imported."
+                ]);
+            }
+
             return response()->json(['success' => true, 'exists' => false, 'cert_name' => $certName]);
 
         } catch (\Exception $e) {
@@ -200,6 +231,8 @@ class AutomationController extends Controller
                 app(KempService::class)->deploy($automation, $latestCert);
             } elseif ($automation->type === 'fortigate') {
                 app(FortigateService::class)->deploy($automation, $latestCert);
+            } elseif ($automation->type === 'paloalto') {
+                app(PaloAltoService::class)->deploy($automation, $latestCert);
             }
 
             AuditLog::log('automation_run', "Manually triggered {$automation->type} deployment for: {$automation->domain->name}");
