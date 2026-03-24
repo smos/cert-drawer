@@ -1,5 +1,27 @@
 @extends('layouts.app')
 
+@php
+    if (!function_exists('getIssuerColor')) {
+        function getIssuerColor($issuer) {
+            if (!$issuer || $issuer === 'N/A' || $issuer === 'Unknown') return '#95a5a6';
+            $name = trim(explode(',', $issuer)[0]);
+            $name = str_replace('CN=', '', $name);
+            
+            $sum = 0;
+            for ($i = 0; $i < strlen($name); $i++) {
+                $sum += ord($name[$i]) * ($i + 1);
+            }
+            
+            $colors = [
+                '#3498db', '#9b59b6', '#2c3e50', '#e91e63', '#00bcd4',
+                '#673ab7', '#3f51b5', '#2196f3', '#795548', '#607d8b'
+            ];
+            
+            return $colors[$sum % count($colors)];
+        }
+    }
+@endphp
+
 @section('content')
 @if($errors->any())
     <div style="background: #f8d7da; color: #721c24; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #f5c6cb;">
@@ -51,7 +73,13 @@
     @foreach($domains as $domain)
         <li class="domain-item" onclick="openDrawer({{ $domain->id }})" style="border-left: 6px solid {{ $domain->health_color }}; {{ $domain->is_enabled ? '' : 'opacity: 0.6; background: #f9f9f9;' }}">
             <div style="flex: 1;">
-                <strong>{{ $domain->name }}</strong> @if(!$domain->is_enabled) <small style="color:#e74c3c;">(Disabled)</small> @endif
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <strong>{{ $domain->name }}</strong>
+                    @if($isCa)
+                        <span style="background: {{ getIssuerColor($domain->name) }}; color: white; font-size: 0.65rem; padding: 2px 8px; border-radius: 12px; font-weight: 600;" title="Authority">CA</span>
+                    @endif
+                    @if(!$domain->is_enabled) <small style="color:#e74c3c;">(Disabled)</small> @endif
+                </div>
                 <div style="margin-top: 5px;">
                     @foreach($domain->tags as $tag)
                         <span class="tag {{ $tag->type }}" style="font-size: 0.65rem;">{{ $tag->name }}</span>

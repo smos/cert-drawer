@@ -293,6 +293,20 @@
         const overlay = document.getElementById('overlay');
         const drawerContent = document.getElementById('drawer-content');
 
+        function getIssuerColor(issuer) {
+            if (!issuer || issuer === 'N/A' || issuer === 'Unknown') return '#95a5a6';
+            let name = issuer.split(',')[0].replace('CN=', '').trim();
+            let sum = 0;
+            for (let i = 0; i < name.length; i++) {
+                sum += name.charCodeAt(i) * (i + 1);
+            }
+            const colors = [
+                '#3498db', '#9b59b6', '#2c3e50', '#e91e63', '#00bcd4',
+                '#673ab7', '#3f51b5', '#2196f3', '#795548', '#607d8b'
+            ];
+            return colors[sum % colors.length];
+        }
+
         function openDrawer(domainId) {
             fetch(`/domains/${domainId}`)
                 .then(res => {
@@ -462,20 +476,26 @@
 
                 <h3>Certificate History</h3>
                 <div class="cert-history">
-                    ${(domain.certificates || []).length ? (domain.certificates || []).map(c => `
-                        <div class="cert-item">
+                    ${(domain.certificates || []).length ? (domain.certificates || []).map(c => {
+                        const caName = c.root_ca_name || c.issuer || 'Unknown';
+                        const caColor = getIssuerColor(caName);
+                        return `
+                        <div class="cert-item" style="border-left: 5px solid ${caColor};">
                             <div onclick="this.nextElementSibling.classList.toggle('active')" style="cursor:pointer; display:flex; justify-content:space-between; align-items: center;">
                                 <div>
-                                    <strong>${c.status === 'issued' ? 'CERT' : 'CSR'}</strong> 
+                                    <strong style="background: ${caColor}; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.8rem;">${c.status === 'issued' ? 'CERT' : 'CSR'}</strong> 
                                     <small style="margin-left: 10px; color: #666;">
                                         ${c.valid_from && c.expiry_fmt ? `${c.valid_from} to ${c.expiry_fmt}` : new Date(c.created_at).toLocaleDateString()}
                                     </small>
                                 </div>
-                                <span style="font-size: 0.8rem; color: #888;">${c.is_ca ? '(CA)' : ''} &blacktriangledown;</span>
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    ${c.is_ca ? '<span class="tag" style="background:#34495e; color:white; font-size:0.6rem;">CA</span>' : ''}
+                                    <span style="font-size: 0.8rem; color: #888;">&blacktriangledown;</span>
+                                </div>
                             </div>
                             <div class="collapsible">
                                 <p>Status: <span class="tag">${c.status}</span></p>
-                                <p>Used Root CA: <span style="font-weight: 600; color: #34495e;">${c.root_ca_name || 'N/A'}</span></p>
+                                <p>Authority: <span style="background: ${caColor}; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">${caName}</span></p>
                                 ${c.chain_incomplete ? `
                                     <div style="background: #fff3cd; color: #856404; border: 1px solid #ffeeba; padding: 8px; border-radius: 4px; font-size: 0.8rem; margin: 10px 0;">
                                         ⚠️ <strong>Incomplete Chain:</strong> Root CA or intermediate is missing from Authorities.
@@ -509,7 +529,8 @@
                                 </div>
                             </div>
                         </div>
-                    `).join('') : '<p>No history available</p>'}
+                    `;
+                    }).join('') : '<p>No history available</p>'}
                 </div>
 
                 ${isAdmin ? `
