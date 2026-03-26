@@ -80,18 +80,33 @@
                     @endif
                     @if(!$domain->is_enabled) <small style="color:#e74c3c;">(Disabled)</small> @endif
                 </div>
-                <div style="margin-top: 5px;">
+                <div style="margin-top: 5px; display: flex; gap: 5px; flex-wrap: wrap; align-items: center;">
                     @foreach($domain->tags as $tag)
                         <span class="tag {{ $tag->type }}" style="font-size: 0.65rem;">{{ $tag->name }}</span>
                     @endforeach
+
+                    @if(!empty($domain->active_certs) && count($domain->active_certs) > 1)
+                        @foreach($domain->active_certs as $ac)
+                            <div title="{{ $ac['issuer'] }} (Expires: {{ $ac['expiry'] }})" 
+                                 style="width: 10px; height: 10px; border-radius: 50%; background: {{ $ac['ca_color'] }}; border: 1px solid rgba(0,0,0,0.1);">
+                            </div>
+                        @endforeach
+                    @endif
                 </div>
             </div>
             <div style="text-align: right;">
-                @if($domain->latest_expiry)
-                    <div style="font-size: 0.9rem; font-weight: 600; color: {{ $domain->health_color == '#f1c40f' ? '#8a6d3b' : $domain->health_color }}">
-                        Expires: {{ $domain->latest_expiry }}
-                    </div>
-                    <div style="font-size: 0.75rem; color: #888;">
+                @if(!empty($domain->active_certs))
+                    @foreach(collect($domain->active_certs)->sortBy('days') as $ac)
+                        <div style="display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-bottom: 2px;">
+                            <span style="font-size: 0.65rem; background: {{ $ac['ca_color'] }}; color: white; padding: 1px 5px; border-radius: 3px; font-weight: 600; text-transform: uppercase;">
+                                {{ trim(explode(' ', str_replace('CN=', '', explode(',', $ac['issuer'])[0]))[0]) }}
+                            </span>
+                            <div style="font-size: 0.85rem; font-weight: 600; color: {{ $ac['health_color'] == '#f1c40f' ? '#8a6d3b' : $ac['health_color'] }}">
+                                {{ $ac['expiry'] }}
+                            </div>
+                        </div>
+                    @endforeach
+                    <div style="font-size: 0.7rem; color: #888;">
                         ({{ $domain->expiry_human }})
                     </div>
                 @else

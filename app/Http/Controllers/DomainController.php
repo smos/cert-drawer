@@ -88,35 +88,61 @@ class DomainController extends Controller
             }
 
             if ($isCa) {
-                $latestCert = $domain->certificates->first();
+                $relevantCerts = $domain->certificates;
             } else {
-                $latestCert = $domain->certificates->where('is_ca', false)->first() ?? $domain->certificates->first();
+                $relevantCerts = $domain->certificates->where('is_ca', false);
+                if ($relevantCerts->isEmpty()) {
+                    $relevantCerts = $domain->certificates;
+                }
             }
 
-            if ($latestCert && $latestCert->expiry_date) {
-                $days = (int) ceil(now()->diffInDays($latestCert->expiry_date, false));
-                $domain->latest_expiry = $latestCert->expiry_date->format('Y-m-d');
-                $domain->expiry_human = $latestCert->expiry_date->diffForHumans(['parts' => 2, 'join' => true]);
-                
-                if ($days <= 0) {
-                    $domain->health_color = '#e74c3c'; // Expired
-                    $domain->health_status = 'expired';
-                } elseif ($days <= $red) {
-                    $domain->health_color = '#c0392b'; // Critical (Deep Red)
-                    $domain->health_status = 'critical';
-                } elseif ($days <= $orange) {
-                    $domain->health_color = '#e67e22'; // Urgent (Orange)
-                    $domain->health_status = 'urgent';
-                } elseif ($days <= $yellow) {
-                    $domain->health_color = '#f1c40f'; // Warning (Yellow)
-                    $domain->health_status = 'warning';
-                } else {
-                    $domain->health_color = '#2ecc71'; // Healthy (Green)
-                    $domain->health_status = 'healthy';
+            $activeCerts = [];
+            
+            foreach ($relevantCerts as $cert) {
+                if ($cert->status === 'issued' && $cert->expiry_date) {
+                    $days = (int) ceil(now()->diffInDays($cert->expiry_date, false));
+                    $color = '#2ecc71'; // Healthy (Green)
+                    $status = 'healthy';
+                    
+                    if ($days <= 0) {
+                        $color = '#e74c3c'; // Expired
+                        $status = 'expired';
+                    } elseif ($days <= $red) {
+                        $color = '#c0392b'; // Critical (Deep Red)
+                        $status = 'critical';
+                    } elseif ($days <= $orange) {
+                        $color = '#e67e22'; // Urgent (Orange)
+                        $status = 'urgent';
+                    } elseif ($days <= $yellow) {
+                        $color = '#f1c40f'; // Warning (Yellow)
+                        $status = 'warning';
+                    }
+                    
+                    $activeCerts[] = [
+                        'expiry' => $cert->expiry_date->format('Y-m-d'),
+                        'expiry_human' => $cert->expiry_date->diffForHumans(['parts' => 1, 'join' => true]),
+                        'days' => $days,
+                        'health_color' => $color,
+                        'health_status' => $status,
+                        'issuer' => $cert->issuer ?: 'Unknown',
+                        'ca_color' => $this->getIssuerColor($cert->issuer ?: 'Unknown'),
+                        'is_ca' => $cert->is_ca
+                    ];
                 }
+            }
+            $domain->active_certs = $activeCerts;
+
+            // Determine primary health based on the "best" certificate (max days remaining)
+            if (!empty($domain->active_certs)) {
+                $primaryCert = collect($domain->active_certs)->sortByDesc('days')->first();
+                $domain->latest_expiry = $primaryCert['expiry'];
+                $domain->expiry_human = $primaryCert['expiry_human'];
+                $domain->health_color = $primaryCert['health_color'];
+                $domain->health_status = $primaryCert['health_status'];
             } else {
                 $domain->health_color = '#95a5a6'; // No cert (Gray)
                 $domain->health_status = 'none';
+                $domain->latest_expiry = null;
             }
 
             // Apply health status filter if requested
@@ -129,6 +155,24 @@ class DomainController extends Controller
         $pageTitle = $isCa ? 'Authority Certificates (Root/Intermediate)' : 'Managed Domains';
 
         return view('domains.index', compact('domains', 'pageTitle', 'isCa'));
+    }
+
+    protected function getIssuerColor($issuer) {
+        if (!$issuer || $issuer === 'N/A' || $issuer === 'Unknown') return '#95a5a6';
+        $name = trim(explode(',', $issuer)[0]);
+        $name = str_replace('CN=', '', $name);
+        
+        $sum = 0;
+        for ($i = 0; $i < strlen($name); $i++) {
+            $sum += ord($name[$i]) * ($i + 1);
+        }
+        
+        $colors = [
+            '#3498db', '#9b59b6', '#2c3e50', '#e91e63', '#00bcd4',
+            '#673ab7', '#3f51b5', '#2196f3', '#795548', '#607d8b'
+        ];
+        
+        return $colors[$sum % count($colors)];
     }
 
     public function store(Request $request)
@@ -165,7 +209,9 @@ class DomainController extends Controller
         $this->authorizeAccess($domain);
 
         $domain->load(['certificates' => function($query) {
-            $query->orderByRaw('expiry_date DESC NULLS LAST')->orderBy('created_at', 'desc');
+            $query->orderByRaw("CASE WHEN status != 'issued' THEN 0 ELSE 1 END")
+                  ->orderBy('expiry_date', 'desc')
+                  ->orderBy('created_at', 'desc');
         }, 'tags']);
 
         // Rebuild authority tree for all CAs and link domain certs
@@ -344,6 +390,15 @@ class DomainController extends Controller
         }
 
         $domain = Domain::firstOrCreate(['name' => $cn]);
+
+        $thumbprint = $this->certService->extractThumbprint($certData, 'sha1');
+        $existing = Certificate::where('domain_id', $domain->id)
+            ->where('thumbprint_sha1', $thumbprint)
+            ->first();
+
+        if ($existing) {
+            return back()->withErrors(['error' => "Certificate with thumbprint {$thumbprint} already exists for domain {$cn}."]);
+        }
         
         $certificate = $domain->certificates()->create([
             'request_type' => 'manual',
@@ -352,7 +407,7 @@ class DomainController extends Controller
             'expiry_date' => isset($info['validTo_time_t']) ? date('Y-m-d H:i:s', $info['validTo_time_t']) : null,
             'issuer' => $info['issuer']['CN'] ?? 'Unknown',
             'is_ca' => $isCa,
-            'thumbprint_sha1' => $this->certService->extractThumbprint($certData, 'sha1'),
+            'thumbprint_sha1' => $thumbprint,
             'thumbprint_sha256' => $this->certService->extractThumbprint($certData, 'sha256'),
         ]);
 
@@ -396,6 +451,15 @@ class DomainController extends Controller
 
         $domain = Domain::firstOrCreate(['name' => $cn]);
         
+        $thumbprint = $this->certService->extractThumbprint($res['cert'], 'sha1');
+        $existing = Certificate::where('domain_id', $domain->id)
+            ->where('thumbprint_sha1', $thumbprint)
+            ->first();
+
+        if ($existing) {
+            return back()->withErrors(['error' => "Certificate with thumbprint {$thumbprint} already exists for domain {$cn}."]);
+        }
+        
         // If domain already exists, check access
         if ($domain->wasRecentlyCreated === false) {
             if (!Auth::user()->canAccess($domain)) {
@@ -412,7 +476,7 @@ class DomainController extends Controller
             'expiry_date' => isset($res['info']['validTo_time_t']) ? date('Y-m-d H:i:s', $res['info']['validTo_time_t']) : null,
             'issuer' => $res['info']['issuer']['CN'] ?? 'Unknown',
             'is_ca' => $isCa,
-            'thumbprint_sha1' => $this->certService->extractThumbprint($res['cert'], 'sha1'),
+            'thumbprint_sha1' => $thumbprint,
             'thumbprint_sha256' => $this->certService->extractThumbprint($res['cert'], 'sha256'),
         ]);
 
