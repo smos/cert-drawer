@@ -10,13 +10,14 @@ class Certificate extends Model
     protected $fillable = [
         'domain_id', 'issuer_certificate_id', 'request_type', 'csr', 'certificate', 
         'private_key', 'pfx_password', 'issuer', 'expiry_date', 'status',
-        'thumbprint_sha1', 'thumbprint_sha256', 'metadata', 'is_ca'
+        'thumbprint_sha1', 'thumbprint_sha256', 'metadata', 'is_ca', 'archived_at'
     ];
 
     protected $casts = [
         'expiry_date' => 'datetime',
         'metadata' => 'array',
         'is_ca' => 'boolean',
+        'archived_at' => 'datetime',
     ];
 
     public function domain(): BelongsTo

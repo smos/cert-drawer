@@ -99,6 +99,8 @@ class DomainController extends Controller
             $activeCerts = [];
             
             foreach ($relevantCerts as $cert) {
+                if ($cert->archived_at) continue;
+                
                 if ($cert->status === 'issued' && $cert->expiry_date) {
                     $days = (int) ceil(now()->diffInDays($cert->expiry_date, false));
                     $color = '#2ecc71'; // Healthy (Green)

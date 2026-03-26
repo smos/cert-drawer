@@ -476,7 +476,7 @@
 
                 <h3>Certificate History</h3>
                 <div class="cert-history">
-                    ${(domain.certificates || []).length ? (domain.certificates || []).map(c => {
+                    ${(domain.certificates || []).filter(c => !c.archived_at).length ? (domain.certificates || []).filter(c => !c.archived_at).map(c => {
                         const caName = c.root_ca_name || c.issuer || 'Unknown';
                         const caColor = getIssuerColor(caName);
                         return `
@@ -529,9 +529,46 @@
                                 </div>
                             </div>
                         </div>
-                    `;
+                        `;
                     }).join('') : '<p>No history available</p>'}
                 </div>
+
+                ${(domain.certificates || []).filter(c => c.archived_at).length ? `
+                <div style="margin-top: 20px;">
+                    <div onclick="this.nextElementSibling.classList.toggle('active')" style="cursor:pointer; background: #eee; padding: 10px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center;">
+                        <h4 style="margin:0;">Archived Certificates (${(domain.certificates || []).filter(c => c.archived_at).length})</h4>
+                        <span>&blacktriangledown;</span>
+                    </div>
+                    <div class="collapsible" style="padding-top: 10px;">
+                        ${(domain.certificates || []).filter(c => c.archived_at).map(c => {
+                            const caName = c.root_ca_name || c.issuer || 'Unknown';
+                            const caColor = getIssuerColor(caName);
+                            return `
+                            <div class="cert-item" style="border-left: 5px solid #ccc; opacity: 0.7; margin-bottom: 5px; background: #fdfdfd;">
+                                <div onclick="this.nextElementSibling.classList.toggle('active')" style="cursor:pointer; display:flex; justify-content:space-between; align-items: center;">
+                                    <div>
+                                        <strong style="background: #ccc; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.8rem;">ARCHIVED</strong> 
+                                        <small style="margin-left: 10px; color: #666;">
+                                            ${c.expiry_fmt ? `Expired: ${c.expiry_fmt}` : new Date(c.created_at).toLocaleDateString()}
+                                        </small>
+                                    </div>
+                                    <span style="font-size: 0.8rem; color: #888;">&blacktriangledown;</span>
+                                </div>
+                                <div class="collapsible">
+                                    <p>Authority: <span style="background: ${caColor}; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">${caName}</span></p>
+                                    <p>Issuer: ${c.issuer || 'N/A'}</p>
+                                    <p>Archived At: ${new Date(c.archived_at).toLocaleString()}</p>
+                                    <div class="actions" style="margin-top:10px">
+                                        <button class="btn btn-sm" onclick="showCertificateDetails(${c.id})">Details</button>
+                                        <a href="/certificates/${c.id}/download/cert" class="btn btn-sm">Download Cert</a>
+                                    </div>
+                                </div>
+                            </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+                ` : ''}
 
                 ${isAdmin ? `
                 <hr style="margin-top: 40px; border: 0; border-top: 1px solid #ffcfcf;">

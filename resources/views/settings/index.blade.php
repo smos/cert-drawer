@@ -110,6 +110,14 @@
     </div>
 
     <hr>
+    <h3>Archiving & Cleanup</h3>
+    <div style="margin-bottom:15px">
+        <label>Archive Expired Certificates (Days since expiry)</label><br>
+        <input type="number" name="archive_threshold_days" value="{{ $settings['archive_threshold_days'] ?? '180' }}" min="1" style="width:100%; padding:8px; border:1px solid #ddd;">
+        <small style="color: #666;">Certificates expired longer than this many days will be archived (private keys purged, certificates hidden in drawer).</small>
+    </div>
+
+    <hr>
     <h3>SMTP Settings</h3>
     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
         <div style="grid-column: span 2;">
