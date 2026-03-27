@@ -2,7 +2,8 @@
 
 ## Core Capabilities
 - **Certificate Lifecycle:** Supports CSR initiation (Auto/Custom/Upload) and fulfillment via ADCS or ACME.
-- **ACME Integration:** Uses `acme.sh` CLI wrapper (`AcmeService`) for automated DV, SAN, and Wildcard fulfillment with EAB support (Networking4all).
+- **ACME Integration:** Native PHP implementation (`AcmeService`) for automated DV, SAN, and Wildcard fulfillment with EAB support (Networking4all).
+- **Automation:** Support for automated certificate deployment to Kemp Loadmasters, Fortigate firewalls, and Palo Alto firewalls via API.
 - **Authentication:** Dual LDAP (Active Directory) and Local database authentication. Automatic synchronization of LDAP users to local DB using `guid`. 
 - **Authorization:** 
     - Global "Allowed LDAP Groups" in settings.
@@ -16,13 +17,13 @@
 - **Management:** Dashboard filterable by health (Expired, Expiring, Healthy) and domain status (Enabled/Disabled).
 
 ## Technical Details
-- **ACME Path:** Script at `storage/app/acme/acme.sh`, Home at `/home/smos/acme`, Certs at `/home/smos/acme/certs`.
+- **ACME Implementation:** Native PHP ACME v2 client.
 - **Database:** SQLite.
 - **LDAP:** Uses `LdapRecord-Laravel`. `AppServiceProvider` dynamically re-registers connection from DB settings.
 - **CLI:** `php artisan admin:setup {email}` for local admin management.
 
 ## Roadmap / Next Steps
 - Automated Expiry Notifications (Email/Webhooks).
-- Scheduled auto-renewal for ACME certificates.
-- Certificate chain management.
+- Scheduled auto-renewal for ACME certificates (Implemented).
+- Certificate chain management (Improved).
 - Improved search (search by serial, issuer).

@@ -54,8 +54,5 @@ RUN sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# Create acme home and set permissions
-RUN mkdir -p /acme && chown www-data:www-data /acme
-
 ENTRYPOINT ["entrypoint.sh"]
 CMD ["apache2-foreground"]

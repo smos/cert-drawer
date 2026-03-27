@@ -22,16 +22,16 @@ Certificate Details
 - LDAP authentication and groups
 - LDAP group visibility and operations (view, download etc.)
 - ADCS Certificate fulfilment using ADCS Webserver
-- ACME Certificate fulfilment (tested with networking4all.com)
+- ACME Certificate fulfilment (Native PHP implementation)
 - Audit Logging
 - DNS monitoring for domains with change tracking
 - Certificate monitoring for domains with change tracking
 - Automated emails on changes to DNS/Certificates
+- Kemp (API) deployment
+- Fortigate (API) deployment
+- Palo Alto (API) deployment
 
 # Automation Wishlist, not yet working, TODO
-- Kemp (API) (placeholder)
-- Fortigate (API)
-- Palo Alto (API)
 - Windows (TBD)
 
 # Deployment
@@ -47,17 +47,13 @@ Example Stack content for Portainer
 	    volumes:
 	      - cert-data:/var/www/html/storage/app/private/certificates
 	      - db-data:/var/www/html/storage/database
-	      - acme-data:/acme
 	    environment:
-	      - APP_ENV=https://certdrawer.hdnet.nl
+              - APP_URL=https://certdrawer.domain.local
 	      - APP_ENV=production
 	      - APP_DEBUG=false
 	      - APP_KEY=
 	      - DB_CONNECTION=sqlite
 	      - DB_DATABASE=/var/www/html/storage/database/database.sqlite
-	      - ACME_HOME=/acme
-	      - ACME_CERTS=/acme/certs
-	      - ACME_BINARY=/acme/acme.sh
 	    restart: unless-stopped
 	    healthcheck:
 	      test: ["CMD", "curl", "-f -s", "http://localhost/health"]
@@ -72,22 +68,18 @@ Example Stack content for Portainer
 	    volumes:
 	      - cert-data:/var/www/html/storage/app/private/certificates
 	      - db-data:/var/www/html/storage/database
-	      - acme-data:/acme
 	    environment:
+              - APP_URL=https://certdrawer.domain.local
 	      - APP_ENV=production
 	      - APP_DEBUG=false
 	      - APP_KEY=
 	      - DB_DATABASE=/var/www/html/storage/database/database.sqlite
 	      - DB_CONNECTION=sqlite
-	      - ACME_HOME=/acme
-	      - ACME_CERTS=/acme/certs
-	      - ACME_BINARY=/acme/acme.sh
 	    restart: unless-stopped
 	
 	volumes:
 	  cert-data:
 	  db-data:
-	  acme-data:
 
 
 Make sure to comnfigure the local Docker instance with IPv6, as it will poke at both when it resolves either.
@@ -104,4 +96,3 @@ The app has a few custom command available via the PHP artisan commands.
 - "php artisan import:folder" will attempt to import a wide range of CA and certificate files if these a somehwat decent, consistent format and layout. Testing with about ~100 certificates.
 - "php artisan certificates:deduplicate" can be run as maintenance task for removing duplicates
 - "php artisan certificates:migrate-folders" can be run to move from older directory format to newer format based on cert date.
-
