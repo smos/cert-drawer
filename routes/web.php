@@ -36,6 +36,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/domains/{domain}/initiate-request', [CertificateController::class, 'initiateRequest'])->name('domains.initiate-request');
 
     Route::get('/certificates/{certificate}', [CertificateController::class, 'show'])->name('certificates.show');
+    Route::delete('/certificates/{certificate}', [CertificateController::class, 'destroy'])->name('certificates.destroy');
     Route::post('/certificates/{certificate}/adcs-request', [CertificateController::class, 'requestAdcs'])->name('certificates.adcs-request');
     Route::post('/certificates/{certificate}/acme-request', [CertificateController::class, 'requestAcme'])->name('certificates.acme-request');
     Route::post('/certificates/{certificate}/acme-fulfill', [CertificateController::class, 'fulfillAcme'])->name('certificates.acme-fulfill');

@@ -525,6 +525,7 @@
                                         ${c.private_key ? `<button class="btn btn-sm" onclick="downloadKey(${c.id})">Download Key</button>` : ''}
                                     ` : `
                                         <button class="btn btn-sm" onclick="uploadCert(${c.id})">Upload Cert</button>
+                                        <button class="btn btn-sm" style="background: #e74c3c; color: white;" onclick="deleteCsr(${c.id}, ${domain.id})">Delete CSR</button>
                                     `}
                                 </div>
                             </div>
@@ -721,6 +722,31 @@
             .then(() => {
                 alert('Domain deleted and files purged.');
                 window.location.reload();
+            });
+        }
+
+        function deleteCsr(certId, domainId) {
+            if (!confirm('Are you sure you want to delete this CSR?')) {
+                return;
+            }
+
+            fetch(`/certificates/${certId}`, {
+                method: 'DELETE',
+                headers: {
+                    'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                }
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    alert(data.message);
+                    openDrawer(domainId);
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            })
+            .catch(err => {
+                alert('Error deleting CSR: ' + err.message);
             });
         }
 
@@ -947,7 +973,7 @@
             
             modal.style.display = 'block';
             overlay.classList.add('active');
-            statusText.innerText = 'Initializing acme.sh verification...';
+            statusText.innerText = 'Initializing ACME verification...';
 
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
@@ -965,7 +991,7 @@
                 clearTimeout(timeoutId);
                 modal.style.display = 'none';
                 if (data.success) {
-                    alert('Success! Certificate has been issued via acme.sh.');
+                    alert('Success! Certificate has been issued via ACME service.');
                     openDrawer(domainId);
                 } else {
                     alert('ACME Error: ' + data.message);
