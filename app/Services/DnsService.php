@@ -6,6 +6,7 @@ use App\Models\Domain;
 use App\Models\DnsLog;
 use App\Models\Setting;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Http;
 
 class DnsService
 {
@@ -15,6 +16,26 @@ class DnsService
      */
     public function getDnsRecords(string $domain, ?string $resolver = null): array
     {
+        $externalUrl = Setting::where('key', 'external_poller_url')->value('value');
+
+        if (!empty($externalUrl)) {
+            try {
+                $response = Http::timeout(30)->post($externalUrl, [
+                    'domain' => $domain,
+                    'type' => 'dns',
+                    'resolver' => $resolver,
+                ]);
+
+                if ($response->successful()) {
+                    return $response->json();
+                }
+
+                Log::warning("External DNS poller at {$externalUrl} failed for {$domain}: " . $response->body() . ". Falling back to local.");
+            } catch (\Exception $e) {
+                Log::warning("External DNS poller at {$externalUrl} error for {$domain}: " . $e->getMessage() . ". Falling back to local.");
+            }
+        }
+
         try {
             $records = $this->fetchRecords($domain, $resolver);
             

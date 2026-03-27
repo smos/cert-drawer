@@ -598,4 +598,13 @@ class DomainController extends Controller
 
         return response()->json(['success' => true]);
     }
+
+    public function verifyDomain(Request $request)
+    {
+        $domain = $request->input('domain');
+        if (empty($domain)) return response()->json(['exists' => false]);
+        
+        $exists = Domain::where('name', $domain)->exists();
+        return response()->json(['exists' => $exists]);
+    }
 }

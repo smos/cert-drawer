@@ -6,6 +6,7 @@ use App\Models\Domain;
 use App\Models\CertHealthLog;
 use App\Models\Setting;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Http;
 
 class CertHealthService
 {
@@ -19,7 +20,40 @@ class CertHealthService
         }
 
         $resolver = Setting::where('key', 'dns_resolver')->value('value') ?? '8.8.8.8';
-        
+        $externalUrl = Setting::where('key', 'external_poller_url')->value('value');
+
+        if (!empty($externalUrl)) {
+            try {
+                $response = Http::timeout(30)->post($externalUrl, [
+                    'domain' => $domain->name,
+                    'type' => 'certificate',
+                    'resolver' => $resolver,
+                ]);
+
+                if ($response->successful()) {
+                    $results = $response->json();
+                    if (is_array($results)) {
+                        foreach ($results as $ipResult) {
+                            CertHealthLog::create([
+                                'domain_id' => $domain->id,
+                                'ip_address' => $ipResult['ip_address'] ?? 'Unknown',
+                                'ip_version' => $ipResult['ip_version'] ?? 'v4',
+                                'thumbprint_sha256' => $ipResult['thumbprint_sha256'] ?? null,
+                                'issuer' => $ipResult['issuer'] ?? null,
+                                'expiry_date' => $ipResult['expiry_date'] ?? null,
+                                'error' => $ipResult['error'] ?? null,
+                            ]);
+                        }
+                        $domain->update(['last_cert_check' => now()]);
+                        return;
+                    }
+                }
+                Log::warning("External Cert poller at {$externalUrl} failed for {$domain->name}: " . $response->body() . ". Falling back to local.");
+            } catch (\Exception $e) {
+                Log::warning("External Cert poller at {$externalUrl} error for {$domain->name}: " . $e->getMessage() . ". Falling back to local.");
+            }
+        }
+
         // Resolve A and AAAA records
         $ips = $this->resolveIps($domain->name, $resolver);
 

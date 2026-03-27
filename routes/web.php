@@ -9,6 +9,7 @@ use App\Http\Controllers\HealthController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', [HealthController::class, 'check']);
+Route::get('/domaintest', [DomainController::class, 'verifyDomain'])->name('domaintest');
 
 Route::get('/login', [LoginController::class, 'showLoginForm'])->name('login');
 Route::post('/login', [LoginController::class, 'login']);

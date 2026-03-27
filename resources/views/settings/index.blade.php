@@ -114,6 +114,12 @@
         <small style="color: #666;">Minimum time between automated DNS checks (Recommended: 1 to 24 hours).</small>
     </div>
 
+    <div style="margin-bottom:15px">
+        <label>External Poller URL</label><br>
+        <input type="text" name="external_poller_url" value="{{ $settings['external_poller_url'] ?? '' }}" placeholder="https://certpoller.domain.local/healthtest.php" style="width:100%; padding:8px; border:1px solid #ddd;">
+        <small style="color: #666;">If set, DNS and Certificate health checks will be offloaded to this external endpoint. Leave empty for native (local) checks.</small>
+    </div>
+
     <hr>
     <h3>Archiving & Cleanup</h3>
     <div style="margin-bottom:15px">
