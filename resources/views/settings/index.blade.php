@@ -76,6 +76,11 @@
             <label>ACME DV-Wildcard URL</label><br>
             <input type="text" name="acme_url_wildcard" value="{{ $settings['acme_url_wildcard'] ?? 'https://acme.networking4all.com/dv-wildcard' }}" style="width:100%; padding:8px; border:1px solid #ddd;">
         </div>
+        <div style="grid-column: span 2;">
+            <label>Auto-Renewal Threshold (Days before expiry)</label><br>
+            <input type="number" name="acme_renewal_days" value="{{ $settings['acme_renewal_days'] ?? '30' }}" min="1" style="width:100%; padding:8px; border:1px solid #ddd;">
+            <small style="color: #666;">ACME certificates will be automatically renewed when they have fewer than this many days remaining.</small>
+        </div>
     </div>
 
     <hr>

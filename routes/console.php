@@ -25,3 +25,4 @@ Schedule::call(function () {
 Schedule::command('dns:monitor')->cron("0 */{$interval} * * *");
 Schedule::command('cert:monitor')->cron("0 */{$interval} * * *");
 Schedule::command('certificates:archive')->dailyAt('01:00');
+Schedule::command('certificates:renew-acme')->dailyAt('02:00');

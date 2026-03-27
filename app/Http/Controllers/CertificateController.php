@@ -9,6 +9,7 @@ use App\Services\CertificateService;
 use App\Services\AcmeService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
 use App\Services\AdcsService;
 use App\Models\Setting;
 use Illuminate\Validation\Rule;
@@ -231,15 +232,14 @@ class CertificateController extends Controller
     {
         $this->authorizeAccess($certificate->domain);
         
-        // With acme.sh, we just mark it as acme type and ready for fulfillment
         $certificate->update([
             'request_type' => 'acme',
             'status' => 'pending_verification'
         ]);
 
-        AuditLog::log('acme_order_initiate', "Initiated ACME fulfillment via acme.sh for: {$certificate->domain->name}");
+        AuditLog::log('acme_order_initiate', "Initiated ACME fulfillment for: {$certificate->domain->name}");
 
-        return response()->json(['success' => true, 'message' => 'Ready to verify via acme.sh.']);
+        return response()->json(['success' => true, 'message' => 'Ready to verify via ACME service.']);
     }
 
     public function fulfillAcme(Request $request, Certificate $certificate)
@@ -247,12 +247,11 @@ class CertificateController extends Controller
         $this->authorizeAccess($certificate->domain);
 
         try {
-            // This runs the acme.sh command
             $this->acmeService->issueCertificate($certificate);
 
-            return response()->json(['success' => true, 'message' => 'Certificate issued successfully via acme.sh.']);
+            return response()->json(['success' => true, 'message' => 'Certificate issued successfully via ACME service.']);
         } catch (\Exception $e) {
-            \Log::error("ACME fulfill error: " . $e->getMessage());
+            Log::error("ACME fulfill error: " . $e->getMessage());
             return response()->json(['success' => false, 'message' => 'ACME Error: ' . $e->getMessage()], 500);
         }
     }
@@ -293,6 +292,29 @@ class CertificateController extends Controller
         }
 
         return response()->json($details);
+    }
+
+    public function destroy(Certificate $certificate)
+    {
+        $this->authorizeAccess($certificate->domain);
+
+        if ($certificate->certificate) {
+            return response()->json(['success' => false, 'message' => 'Cannot delete a CSR that already has an issued certificate.'], 400);
+        }
+
+        $domainName = $certificate->domain->name;
+        $timestamp = $certificate->created_at->format('Y-m-d_H-i-s');
+        $path = "certificates/{$domainName}/{$timestamp}";
+
+        if (Storage::disk('local')->exists($path)) {
+            Storage::disk('local')->deleteDirectory($path);
+        }
+
+        AuditLog::log('csr_delete', "Deleted CSR for domain: {$domainName}");
+        
+        $certificate->delete();
+
+        return response()->json(['success' => true, 'message' => 'CSR deleted successfully.']);
     }
 
     public function generatePfx(Request $request, Certificate $certificate)

@@ -31,6 +31,7 @@ class DatabaseSeeder extends Seeder
             'acme_url_dv' => 'https://acme.example.com/dv',
             'acme_url_san' => 'https://acme.example.com/dv-san',
             'acme_url_wildcard' => 'https://acme.example.com/dv-wildcard',
+            'acme_renewal_days' => '15',
 
             // Admin & Notification Defaults
             'admin_groups' => 'cn=admins,ou=groups,dc=domain,dc=local',

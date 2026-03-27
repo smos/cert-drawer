@@ -318,6 +318,20 @@ subjectAltName = @alt_names
         return @openssl_csr_get_subject($csrPem, false);
     }
 
+    public function generateRenewalCsr(Certificate $oldCert)
+    {
+        $info = $this->getCertInfo($oldCert->certificate);
+        if (!$info) {
+            // Fallback to CSR info if certificate itself is unparseable for some reason
+            $info = $this->getCertInfoFromCsr($oldCert->csr);
+        }
+
+        $dn = $this->extractDnFromCert($info);
+        $sans = $this->extractSansFromCert($info);
+
+        return $this->generateCsr($dn, $sans);
+    }
+
     public function extractSansFromCsr(string $csrPem)
     {
         $tmp = tempnam(sys_get_temp_dir(), 'csr_');
