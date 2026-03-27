@@ -10,6 +10,8 @@
 // --- CONFIGURATION ---
 // Set this to the base URL of your Cert Drawer instance
 $CERT_DRAWER_URL = "https://certdrawer.domain.local";
+// If set in Cert Drawer settings, provide the API Key here
+$POLLER_API_KEY = "";
 // ---------------------
 
 header('Content-Type: application/json');
@@ -42,12 +44,40 @@ if (!preg_match('/^[a-z0-9.-]+$/i', $domain)) {
 
 // 2. Verify Domain with Cert Drawer (Anti-Abuse)
 $verifyUrl = rtrim($CERT_DRAWER_URL, '/') . "/domaintest?domain=" . urlencode($domain);
-$verifyRes = @file_get_contents($verifyUrl);
+
+// Create a stream context to disable SSL verification for the callback if needed
+$contextOptions = [
+    "http" => [
+        "ignore_errors" => true,
+        "timeout" => 5,
+        "header" => "X-Poller-Key: " . $POLLER_API_KEY . "\r\n"
+    ],
+    "ssl" => [
+        "verify_peer" => false,
+        "verify_peer_name" => false,
+    ],
+];
+$context = stream_context_create($contextOptions);
+$verifyRes = @file_get_contents($verifyUrl, false, $context);
+
+if ($verifyRes === false) {
+    $error = error_get_last();
+    http_response_code(500);
+    echo json_encode([
+        'error' => 'Could not connect to Cert Drawer for verification.',
+        'details' => $error['message'] ?? 'Unknown connection error'
+    ]);
+    exit;
+}
+
 $verifyData = json_decode($verifyRes, true);
 
 if (!$verifyData || !isset($verifyData['exists']) || $verifyData['exists'] !== true) {
     http_response_code(403);
-    echo json_encode(['error' => 'Domain not managed by Cert Drawer or unauthorized.']);
+    echo json_encode([
+        'error' => 'Domain verification failed.',
+        'server_response' => $verifyData
+    ]);
     exit;
 }
 
@@ -60,15 +90,27 @@ if ($type === 'dns') {
 
 // --- HELPERS ---
 
+function getResolverPart($resolver) {
+    if (!$resolver) return "";
+    return "@" . escapeshellarg($resolver);
+}
+
 function performDnsCheck($domain, $resolver) {
     $types = ['A', 'AAAA', 'TXT', 'NS', 'CNAME'];
     $records = [];
-    $resolverPart = $resolver ? "@" . escapeshellarg($resolver) : "";
+    $resPart = getResolverPart($resolver);
 
     foreach ($types as $t) {
         $output = [];
-        exec("dig {$resolverPart} +noall +answer " . escapeshellarg($domain) . " " . escapeshellarg($t) . " +tries=3 +time=5", $output);
+        $result = 0;
+        exec("dig {$resPart} +noall +answer " . escapeshellarg($domain) . " " . escapeshellarg($t) . " +tries=2 +time=2", $output, $result);
         
+        // Fallback to local DNS if resolver failed OR returned no results
+        if (($result !== 0 || empty($output)) && $resolver) {
+            $output = [];
+            exec("dig +noall +answer " . escapeshellarg($domain) . " " . escapeshellarg($t) . " +tries=2 +time=2", $output);
+        }
+
         $cleaned = [];
         foreach ($output as $line) {
             $parts = preg_split('/\s+/', trim($line));
@@ -85,7 +127,12 @@ function performDnsCheck($domain, $resolver) {
 
     // DMARC
     $dmarcOut = [];
-    exec("dig {$resolverPart} +noall +answer _dmarc." . escapeshellarg($domain) . " TXT +tries=3 +time=5", $dmarcOut);
+    exec("dig {$resPart} +noall +answer _dmarc." . escapeshellarg($domain) . " TXT +tries=2 +time=2", $dmarcOut, $resD);
+    if ((empty($dmarcOut) || $resD !== 0) && $resolver) {
+        $dmarcOut = [];
+        exec("dig +noall +answer _dmarc." . escapeshellarg($domain) . " TXT +tries=2 +time=2", $dmarcOut);
+    }
+    
     $dmarcValues = [];
     foreach ($dmarcOut as $line) {
         $parts = preg_split('/\s+/', trim($line));
@@ -102,7 +149,11 @@ function performDnsCheck($domain, $resolver) {
     foreach ($dkim_selectors as $selector) {
         $fqdn = "{$selector}._domainkey.{$domain}";
         $out = [];
-        exec("dig {$resolverPart} +noall +answer " . escapeshellarg($fqdn) . " TXT +tries=3 +time=5", $out);
+        exec("dig {$resPart} +noall +answer " . escapeshellarg($fqdn) . " TXT +tries=2 +time=2", $out, $resK);
+        if ((empty($out) || $resK !== 0) && $resolver) {
+            $out = [];
+            exec("dig +noall +answer " . escapeshellarg($fqdn) . " TXT +tries=2 +time=2", $out);
+        }
         foreach ($out as $line) {
             $parts = preg_split('/\s+/', trim($line));
             if (count($parts) >= 5 && strtoupper($parts[3]) === 'TXT') {
@@ -119,18 +170,30 @@ function performDnsCheck($domain, $resolver) {
 
 function performCertCheck($domain, $resolver) {
     $ips = [];
-    $resolverPart = $resolver ? "@" . escapeshellarg($resolver) : "";
+    $resPart = getResolverPart($resolver);
     
     // Resolve IPv4
     $out4 = [];
-    exec("dig {$resolverPart} +short " . escapeshellarg($domain) . " A +tries=3", $out4);
+    $res4 = 0;
+    exec("dig {$resPart} +short " . escapeshellarg($domain) . " A +tries=2 +time=2", $out4, $res4);
+    if (($res4 !== 0 || empty($out4)) && $resolver) { 
+        $out4 = []; 
+        exec("dig +short " . escapeshellarg($domain) . " A +tries=2 +time=2", $out4); 
+    }
+    
     foreach (array_filter(array_map('trim', $out4)) as $ip) {
         if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) $ips[] = ['ip' => $ip, 'version' => 'v4'];
     }
 
     // Resolve IPv6
     $out6 = [];
-    exec("dig {$resolverPart} +short " . escapeshellarg($domain) . " AAAA +tries=3", $out6);
+    $res6 = 0;
+    exec("dig {$resPart} +short " . escapeshellarg($domain) . " AAAA +tries=2 +time=2", $out6, $res6);
+    if (($res6 !== 0 || empty($out6)) && $resolver) { 
+        $out6 = []; 
+        exec("dig +short " . escapeshellarg($domain) . " AAAA +tries=2 +time=2", $out6); 
+    }
+
     foreach (array_filter(array_map('trim', $out6)) as $ip) {
         if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) $ips[] = ['ip' => $ip, 'version' => 'v6'];
     }

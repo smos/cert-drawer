@@ -120,6 +120,12 @@
         <small style="color: #666;">If set, DNS and Certificate health checks will be offloaded to this external endpoint. Leave empty for native (local) checks.</small>
     </div>
 
+    <div style="margin-bottom:15px">
+        <label>Poller API Key</label><br>
+        <input type="password" name="poller_api_key" value="{{ isset($settings['poller_api_key']) ? '********' : '' }}" placeholder="Enter a secure key for poller communication" style="width:100%; padding:8px; border:1px solid #ddd;">
+        <small style="color: #666;">This key must match the one configured in the external poller script for secure callbacks.</small>
+    </div>
+
     <hr>
     <h3>Archiving & Cleanup</h3>
     <div style="margin-bottom:15px">

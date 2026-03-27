@@ -601,6 +601,14 @@ class DomainController extends Controller
 
     public function verifyDomain(Request $request)
     {
+        $apiKey = Setting::where('key', 'poller_api_key')->value('value');
+        if (!empty($apiKey)) {
+            $providedKey = $request->header('X-Poller-Key') ?? $request->input('api_key');
+            if ($providedKey !== $apiKey) {
+                return response()->json(['exists' => false, 'error' => 'Invalid API Key'], 401);
+            }
+        }
+
         $domain = $request->input('domain');
         if (empty($domain)) return response()->json(['exists' => false]);
         

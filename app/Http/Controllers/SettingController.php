@@ -63,7 +63,7 @@ class SettingController extends Controller
     public function update(Request $request)
     {
         foreach ($request->except(['_token']) as $key => $value) {
-            if (in_array($key, ['acme_hmac', 'mail_password']) && ($value === '********' || empty($value))) {
+            if (in_array($key, ['acme_hmac', 'mail_password', 'poller_api_key']) && ($value === '********' || empty($value))) {
                 if ($value === '********') continue;
                 if (empty($value) && Setting::where('key', $key)->exists()) continue;
             }

@@ -23,8 +23,9 @@ class CertHealthService
         $externalUrl = Setting::where('key', 'external_poller_url')->value('value');
 
         if (!empty($externalUrl)) {
+            Log::info("CertHealthService: Attempting external Cert check for {$domain->name} via {$externalUrl}");
             try {
-                $response = Http::timeout(30)->post($externalUrl, [
+                $response = Http::withoutVerifying()->timeout(30)->post($externalUrl, [
                     'domain' => $domain->name,
                     'type' => 'certificate',
                     'resolver' => $resolver,
@@ -33,6 +34,7 @@ class CertHealthService
                 if ($response->successful()) {
                     $results = $response->json();
                     if (is_array($results)) {
+                        Log::info("CertHealthService: External Cert check successful for {$domain->name} (" . count($results) . " IPs)");
                         foreach ($results as $ipResult) {
                             CertHealthLog::create([
                                 'domain_id' => $domain->id,
@@ -48,10 +50,12 @@ class CertHealthService
                         return;
                     }
                 }
-                Log::warning("External Cert poller at {$externalUrl} failed for {$domain->name}: " . $response->body() . ". Falling back to local.");
+                Log::warning("CertHealthService: External Cert poller at {$externalUrl} returned status " . $response->status() . " for {$domain->name}. Body: " . $response->body() . ". Falling back to local.");
             } catch (\Exception $e) {
-                Log::warning("External Cert poller at {$externalUrl} error for {$domain->name}: " . $e->getMessage() . ". Falling back to local.");
+                Log::warning("CertHealthService: External Cert poller at {$externalUrl} error for {$domain->name}: " . $e->getMessage() . ". Falling back to local.");
             }
+        } else {
+            Log::info("CertHealthService: No external poller configured, performing local check for {$domain->name}");
         }
 
         // Resolve A and AAAA records

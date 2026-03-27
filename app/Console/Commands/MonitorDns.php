@@ -32,10 +32,15 @@ class MonitorDns extends Command
     public function handle(DnsService $dnsService)
     {
         $domainId = $this->argument('domain_id');
+        $externalUrl = Setting::where('key', 'external_poller_url')->value('value');
 
         if ($domainId) {
             $domain = Domain::findOrFail($domainId);
-            $this->info("Monitoring DNS for {$domain->name}...");
+            if ($externalUrl) {
+                $this->info("Monitoring DNS for {$domain->name} via external poller: {$externalUrl}");
+            } else {
+                $this->info("Monitoring DNS for {$domain->name} locally...");
+            }
             $dnsService->monitorDomain($domain);
             $this->info("Done.");
             return;

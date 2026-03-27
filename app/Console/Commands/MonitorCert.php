@@ -32,10 +32,15 @@ class MonitorCert extends Command
     public function handle(CertHealthService $certService)
     {
         $domainId = $this->argument('domain_id');
+        $externalUrl = Setting::where('key', 'external_poller_url')->value('value');
 
         if ($domainId) {
             $domain = Domain::findOrFail($domainId);
-            $this->info("Checking Certificate for {$domain->name}...");
+            if ($externalUrl) {
+                $this->info("Checking Certificate for {$domain->name} via external poller: {$externalUrl}");
+            } else {
+                $this->info("Checking Certificate for {$domain->name} locally...");
+            }
             $certService->monitorDomain($domain);
             $this->info("Done.");
             return;

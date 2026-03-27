@@ -19,21 +19,25 @@ class DnsService
         $externalUrl = Setting::where('key', 'external_poller_url')->value('value');
 
         if (!empty($externalUrl)) {
+            Log::info("DnsService: Attempting external DNS check for {$domain} via {$externalUrl}");
             try {
-                $response = Http::timeout(30)->post($externalUrl, [
+                $response = Http::withoutVerifying()->timeout(30)->post($externalUrl, [
                     'domain' => $domain,
                     'type' => 'dns',
                     'resolver' => $resolver,
                 ]);
 
                 if ($response->successful()) {
+                    Log::info("DnsService: External DNS check successful for {$domain}");
                     return $response->json();
                 }
 
-                Log::warning("External DNS poller at {$externalUrl} failed for {$domain}: " . $response->body() . ". Falling back to local.");
+                Log::warning("DnsService: External DNS poller at {$externalUrl} returned status " . $response->status() . " for {$domain}. Body: " . $response->body() . ". Falling back to local.");
             } catch (\Exception $e) {
-                Log::warning("External DNS poller at {$externalUrl} error for {$domain}: " . $e->getMessage() . ". Falling back to local.");
+                Log::warning("DnsService: External DNS poller at {$externalUrl} error for {$domain}: " . $e->getMessage() . ". Falling back to local.");
             }
+        } else {
+            Log::info("DnsService: No external poller configured, performing local check for {$domain}");
         }
 
         try {
