@@ -3,20 +3,28 @@
  * External Certificate & DNS Poller for Cert Drawer
  * 
  * This script is designed to be hosted independently. It receives requests,
- * verifies the domain with the main Cert Drawer instance, and performs
- * health checks.
+ * performs health checks, and returns the results.
  */
 
 // --- CONFIGURATION ---
-// Set this to the base URL of your Cert Drawer instance
-$CERT_DRAWER_URL = "https://certdrawer.domain.local";
-// If set in Cert Drawer settings, provide the API Key here
+// If set in Cert Drawer settings, provide the API Key here to prevent unauthorized use
 $POLLER_API_KEY = "";
 // ---------------------
 
 header('Content-Type: application/json');
 
-// 1. Basic Input Validation
+// 1. API Key Validation (Anti-Abuse)
+if (!empty($POLLER_API_KEY)) {
+    $providedKey = $_SERVER['HTTP_X_POLLER_KEY'] ?? $_GET['api_key'] ?? null;
+    
+    if ($providedKey !== $POLLER_API_KEY) {
+        http_response_code(401);
+        echo json_encode(['error' => 'Invalid or missing API Key']);
+        exit;
+    }
+}
+
+// 2. Basic Input Validation
 $input = json_decode(file_get_contents('php://input'), true);
 if (!$input) {
     http_response_code(400);
@@ -39,45 +47,6 @@ $domain = filter_var($domain, FILTER_SANITIZE_URL);
 if (!preg_match('/^[a-z0-9.-]+$/i', $domain)) {
     http_response_code(400);
     echo json_encode(['error' => 'Invalid domain format']);
-    exit;
-}
-
-// 2. Verify Domain with Cert Drawer (Anti-Abuse)
-$verifyUrl = rtrim($CERT_DRAWER_URL, '/') . "/domaintest?domain=" . urlencode($domain);
-
-// Create a stream context to disable SSL verification for the callback if needed
-$contextOptions = [
-    "http" => [
-        "ignore_errors" => true,
-        "timeout" => 5,
-        "header" => "X-Poller-Key: " . $POLLER_API_KEY . "\r\n"
-    ],
-    "ssl" => [
-        "verify_peer" => false,
-        "verify_peer_name" => false,
-    ],
-];
-$context = stream_context_create($contextOptions);
-$verifyRes = @file_get_contents($verifyUrl, false, $context);
-
-if ($verifyRes === false) {
-    $error = error_get_last();
-    http_response_code(500);
-    echo json_encode([
-        'error' => 'Could not connect to Cert Drawer for verification.',
-        'details' => $error['message'] ?? 'Unknown connection error'
-    ]);
-    exit;
-}
-
-$verifyData = json_decode($verifyRes, true);
-
-if (!$verifyData || !isset($verifyData['exists']) || $verifyData['exists'] !== true) {
-    http_response_code(403);
-    echo json_encode([
-        'error' => 'Domain verification failed.',
-        'server_response' => $verifyData
-    ]);
     exit;
 }
 

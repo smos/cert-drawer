@@ -25,7 +25,11 @@ class CertHealthService
         if (!empty($externalUrl)) {
             Log::info("CertHealthService: Attempting external Cert check for {$domain->name} via {$externalUrl}");
             try {
-                $response = Http::withoutVerifying()->timeout(30)->post($externalUrl, [
+                $apiKey = Setting::where('key', 'poller_api_key')->value('value');
+                $response = Http::withoutVerifying()
+                    ->withHeaders(['X-Poller-Key' => $apiKey])
+                    ->timeout(30)
+                    ->post($externalUrl, [
                     'domain' => $domain->name,
                     'type' => 'certificate',
                     'resolver' => $resolver,

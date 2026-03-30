@@ -21,7 +21,11 @@ class DnsService
         if (!empty($externalUrl)) {
             Log::info("DnsService: Attempting external DNS check for {$domain} via {$externalUrl}");
             try {
-                $response = Http::withoutVerifying()->timeout(30)->post($externalUrl, [
+                $apiKey = Setting::where('key', 'poller_api_key')->value('value');
+                $response = Http::withoutVerifying()
+                    ->withHeaders(['X-Poller-Key' => $apiKey])
+                    ->timeout(30)
+                    ->post($externalUrl, [
                     'domain' => $domain,
                     'type' => 'dns',
                     'resolver' => $resolver,
