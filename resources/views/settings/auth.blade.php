@@ -78,7 +78,9 @@
 
     <div style="margin-bottom:20px; border: 1px solid #ddd; padding: 15px; border-radius: 8px; background: #fff3cd;">
         <label style="font-weight: 600;">Full Admin Access Groups (Super Admin)</label>
-        <p style="font-size: 0.85rem; color: #666; margin-bottom: 10px;">Members of these groups have full access to all areas and can manage domain access groups.</p>
+        <p style="font-size: 0.85rem; color: #666; margin-bottom: 10px;">
+            Members of these groups have full access to all areas, can manage domain access groups, and have the permission to <strong>permanently delete domains and certificates</strong>.
+        </p>
         
         <div id="admin-selected-groups" style="display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px;">
             @php
