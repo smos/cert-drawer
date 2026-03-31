@@ -63,12 +63,27 @@ class CertHealthService
         }
 
         // Resolve A and AAAA records
-        $ips = $this->resolveIps($domain->name, $resolver);
+        $ips = [];
+        
+        // 1. Try configured resolver
+        if ($resolver) {
+            Log::debug("CertHealthService: Resolving {$domain->name} using resolver {$resolver}");
+            $ips = array_merge($ips, $this->resolveIps($domain->name, $resolver));
+        }
 
-        // Fallback to local DNS if resolver was used and failed to return records
-        if (empty($ips) && $resolver) {
-            Log::info("Cert health DNS check for {$domain->name} returned no IPs using resolver {$resolver}, falling back to local system DNS.");
-            $ips = $this->resolveIps($domain->name, null);
+        // 2. Always also try local system DNS (internal DNS)
+        Log::debug("CertHealthService: Resolving {$domain->name} using local system DNS");
+        $ips = array_merge($ips, $this->resolveIps($domain->name, null));
+
+        // Deduplicate IPs
+        $uniqueIps = [];
+        foreach ($ips as $ipData) {
+            $uniqueIps[$ipData['ip']] = $ipData;
+        }
+        $ips = array_values($uniqueIps);
+
+        if (empty($ips)) {
+            Log::warning("CertHealthService: No IPs resolved for {$domain->name} via any method.");
         }
 
         foreach ($ips as $ipData) {

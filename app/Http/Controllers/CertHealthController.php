@@ -105,6 +105,22 @@ class CertHealthController extends Controller
 
         $certService->monitorDomain($domain);
 
-        return response()->json(['success' => true, 'message' => 'Certificate check completed for ' . $domain->name]);
+        if (request()->expectsJson()) {
+            return response()->json(['success' => true, 'message' => 'Certificate check completed for ' . $domain->name]);
+        }
+
+        return back()->with('success', 'Certificate check completed for ' . $domain->name);
+    }
+
+    public function purgeLogs(Domain $domain)
+    {
+        if (!auth()->user()->canAccess($domain)) {
+            abort(403);
+        }
+
+        CertHealthLog::where('domain_id', $domain->id)->delete();
+        $domain->update(['last_cert_check' => null]);
+
+        return back()->with('success', 'Health logs purged for ' . $domain->name);
     }
 }

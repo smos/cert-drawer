@@ -81,7 +81,18 @@
                         </div>
                     </td>
                     <td style="padding: 10px; color: #666; font-size: 0.85rem;">
-                        {{ $domain->last_cert_check ? $domain->last_cert_check->diffForHumans() : 'Never' }}
+                        <div>{{ $domain->last_cert_check ? $domain->last_cert_check->diffForHumans() : 'Never' }}</div>
+                        <div style="margin-top: 10px; display: flex; gap: 5px;">
+                            <form action="{{ route('cert-health.check-domain', $domain) }}" method="POST">
+                                @csrf
+                                <button type="submit" class="btn btn-sm" style="padding: 2px 8px; font-size: 0.7rem;">Check Now</button>
+                            </form>
+                            <form action="{{ route('cert-health.purge', $domain) }}" method="POST" onsubmit="return confirm('Purge all health history for this domain?');">
+                                @csrf
+                                @method('DELETE')
+                                <button type="submit" class="btn btn-sm" style="padding: 2px 8px; font-size: 0.7rem; background: #e74c3c; color: white;">Purge</button>
+                            </form>
+                        </div>
                     </td>
                 </tr>
             @endforeach

@@ -75,6 +75,7 @@ Route::middleware('auth')->group(function () {
         Route::get('/cert-health', [\App\Http\Controllers\CertHealthController::class, 'index'])->name('cert-health.index');
         Route::post('/cert-health/check-all', [\App\Http\Controllers\CertHealthController::class, 'runCheck'])->name('cert-health.check-all');
         Route::post('/cert-health/{domain}/check', [\App\Http\Controllers\CertHealthController::class, 'runDomainCheck'])->name('cert-health.check-domain');
+        Route::delete('/cert-health/{domain}', [\App\Http\Controllers\CertHealthController::class, 'purgeLogs'])->name('cert-health.purge');
     });
 
     Route::middleware('admin:automations')->group(function () {
