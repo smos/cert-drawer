@@ -21,20 +21,38 @@ class CertHealthController extends Controller
             ->get();
 
         foreach ($domains as $domain) {
-            // Get latest check per IP
+            // Get latest check per IP AND check_type
             $latestLogs = CertHealthLog::where('domain_id', $domain->id)
                 ->whereIn('id', function($query) use ($domain) {
                     $query->selectRaw('MAX(id)')
                         ->from('cert_health_logs')
                         ->where('domain_id', $domain->id)
-                        ->groupBy('ip_address');
+                        ->groupBy('ip_address', 'check_type');
                 })->get();
 
-            $domain->health_logs = $latestLogs;
+            $domain->health_logs = $latestLogs->groupBy('check_type');
             
-            // Check for IPv4 / IPv6 mismatch
-            $thumbprints = $latestLogs->whereNotNull('thumbprint_sha256')->pluck('thumbprint_sha256')->unique();
-            $domain->mismatch = $thumbprints->count() > 1;
+            // Check for thumbprint mismatches WITHIN same check type
+            $domain->mismatch = false;
+            foreach ($domain->health_logs as $type => $logs) {
+                $thumbprints = $logs->whereNotNull('thumbprint_sha256')->pluck('thumbprint_sha256')->unique();
+                if ($thumbprints->count() > 1) {
+                    $domain->mismatch = true;
+                    break;
+                }
+            }
+
+            // Check for mismatch BETWEEN internal and external results
+            $internalThumbprints = $latestLogs->where('check_type', 'internal')->whereNotNull('thumbprint_sha256')->pluck('thumbprint_sha256')->unique();
+            $externalThumbprints = $latestLogs->where('check_type', 'external')->whereNotNull('thumbprint_sha256')->pluck('thumbprint_sha256')->unique();
+            
+            $domain->global_mismatch = false;
+            if ($internalThumbprints->isNotEmpty() && $externalThumbprints->isNotEmpty()) {
+                // If the intersection is empty, it means all internal certs are different from all external certs
+                if ($internalThumbprints->intersect($externalThumbprints)->isEmpty()) {
+                    $domain->global_mismatch = true;
+                }
+            }
             
             // Any errors?
             $domain->has_errors = $latestLogs->whereNotNull('error')->count() > 0;

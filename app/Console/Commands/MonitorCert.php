@@ -107,6 +107,7 @@ class MonitorCert extends Command
         foreach ($newLogs as $newLog) {
             // Check for thumbprint/error changes
             $oldLog = CertHealthLog::where('domain_id', $newLog->domain_id)
+                ->where('check_type', $newLog->check_type)
                 ->where('ip_address', $newLog->ip_address)
                 ->where('id', '<', $newLog->id)
                 ->latest()

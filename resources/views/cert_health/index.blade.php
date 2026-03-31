@@ -32,7 +32,12 @@
                         {{ $domain->name }}
                         @if($domain->mismatch)
                             <div style="color: #e67e22; font-size: 0.75rem; margin-top: 5px;">
-                                ⚠️ <strong>Mismatch:</strong> IPv4 and IPv6 returned different certificates!
+                                ⚠️ <strong>Mismatch:</strong> Multiple certificates found within the same check type!
+                            </div>
+                        @endif
+                        @if($domain->global_mismatch)
+                            <div style="color: #3498db; font-size: 0.75rem; margin-top: 5px;">
+                                ℹ️ <strong>Different Certs:</strong> Internal and External results return different certificates.
                             </div>
                         @endif
                         @if($domain->has_errors)
@@ -63,21 +68,48 @@
                         @endswitch
                     </td>
                     <td style="padding: 10px;">
-                        <div style="display: flex; flex-direction: column; gap: 5px;">
-                            @foreach($domain->health_logs as $log)
-                                <div style="font-size: 0.85rem; border: 1px solid #f0f0f0; padding: 5px; border-radius: 4px;">
-                                    <strong>[{{ $log->ip_version }}]</strong> {{ $log->ip_address }} 
-                                    @if($log->error)
-                                        <span style="color: #c0392b;">&times; {{ $log->error }}</span>
-                                    @else
-                                        <span style="color: #27ae60;">&check;</span> 
-                                        <small style="color: #666;">
-                                            Thumb: <code>{{ substr($log->thumbprint_sha256, 0, 8) }}...</code> 
-                                            Exp: {{ $log->expiry_date ? $log->expiry_date->format('Y-m-d') : 'N/A' }}
-                                        </small>
-                                    @endif
-                                </div>
+                        <div style="display: flex; flex-direction: column; gap: 10px;">
+                            @foreach(['internal' => 'Internal (Local/Poller)', 'external' => 'External (Resolver)'] as $type => $label)
+                                @if(isset($domain->health_logs[$type]))
+                                    @php
+                                        $logs = $domain->health_logs[$type];
+                                        $hasTypeErrors = $logs->whereNotNull('error')->count() > 0;
+                                        $typeThumbprints = $logs->whereNotNull('thumbprint_sha256')->pluck('thumbprint_sha256')->unique();
+                                        $hasTypeMismatch = $typeThumbprints->count() > 1;
+                                        $isCollapsed = !$hasTypeErrors && !$hasTypeMismatch;
+                                    @endphp
+                                    <div class="poller-section">
+                                        <div style="font-size: 0.75rem; font-weight: bold; text-transform: uppercase; color: #777; margin-bottom: 3px; cursor: pointer; display: flex; align-items: center; gap: 5px;" 
+                                             onclick="togglePoller(this)">
+                                            <span>{{ $isCollapsed ? '▶' : '▼' }}</span> {{ $label }}
+                                            @if($isCollapsed)
+                                                <span style="font-weight: normal; text-transform: none; color: #27ae60; margin-left: 5px;">({{ $logs->count() }} IPs Healthy &check;)</span>
+                                            @endif
+                                        </div>
+                                        <div class="poller-content" style="display: {{ $isCollapsed ? 'none' : 'flex' }}; flex-direction: column; gap: 4px;">
+                                            @foreach($logs as $log)
+                                                @php
+                                                    $tooltip = $log->error ?: "Issuer: " . ($log->issuer ?: 'N/A') . "\nThumb: " . $log->thumbprint_sha256 . "\nExpires: " . ($log->expiry_date ? $log->expiry_date->format('Y-m-d H:i') : 'N/A');
+                                                @endphp
+                                                <div style="font-size: 0.85rem; border: 1px solid #f0f0f0; padding: 5px; border-radius: 4px;" title="{{ $tooltip }}">
+                                                    <strong>[{{ $log->ip_version }}]</strong> {{ $log->ip_address }} 
+                                                    @if($log->error)
+                                                        <span style="color: #c0392b;">&times; {{ $log->error }}</span>
+                                                    @else
+                                                        <span style="color: #27ae60;">&check;</span> 
+                                                        <small style="color: #666;">
+                                                            <code>{{ substr($log->thumbprint_sha256, 0, 8) }}...</code> 
+                                                        </small>
+                                                    @endif
+                                                </div>
+                                            @endforeach
+                                        </div>
+                                    </div>
+                                @endif
                             @endforeach
+                            @if($domain->health_logs->isEmpty())
+                                <span style="color: #95a5a6; font-style: italic;">No check data available.</span>
+                            @endif
                         </div>
                     </td>
                     <td style="padding: 10px; color: #666; font-size: 0.85rem;">
@@ -100,3 +132,21 @@
     </table>
 </div>
 @endsection
+
+<script>
+function togglePoller(header) {
+    const content = header.nextElementSibling;
+    const arrow = header.querySelector('span');
+    const healthySpan = header.querySelector('span[style*="color: #27ae60"]');
+    
+    if (content.style.display === 'none') {
+        content.style.display = 'flex';
+        arrow.innerText = '▼';
+        if (healthySpan) healthySpan.style.display = 'none';
+    } else {
+        content.style.display = 'none';
+        arrow.innerText = '▶';
+        if (healthySpan) healthySpan.style.display = 'inline';
+    }
+}
+</script>

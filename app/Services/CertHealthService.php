@@ -22,57 +22,60 @@ class CertHealthService
         $resolver = Setting::where('key', 'dns_resolver')->value('value') ?? '8.8.8.8';
         $externalUrl = Setting::where('key', 'external_poller_url')->value('value');
 
+        // If External Poller is configured, EVERYTHING must go through it.
         if (!empty($externalUrl)) {
-            Log::info("CertHealthService: Attempting external Cert check for {$domain->name} via {$externalUrl}");
+            Log::info("CertHealthService: External Poller configured. Routing ALL checks for {$domain->name} to {$externalUrl}");
             try {
                 $apiKey = Setting::where('key', 'poller_api_key')->value('value');
                 $response = Http::withoutVerifying()
                     ->withHeaders(['X-Poller-Key' => $apiKey])
-                    ->timeout(30)
+                    ->timeout(45) // Increased timeout for dual checks
                     ->post($externalUrl, [
                     'domain' => $domain->name,
                     'type' => 'certificate',
-                    'resolver' => $resolver,
+                    'resolvers' => [
+                        'internal' => 'external', // Poller local DNS is giving internal IPs
+                        'external' => $resolver,   // Resolver setting is giving public IPs
+                    ],
                 ]);
 
                 if ($response->successful()) {
                     $results = $response->json();
                     if (is_array($results)) {
-                        Log::info("CertHealthService: External Cert check successful for {$domain->name} (" . count($results) . " IPs)");
-                        foreach ($results as $ipResult) {
-                            CertHealthLog::create([
-                                'domain_id' => $domain->id,
-                                'ip_address' => $ipResult['ip_address'] ?? 'Unknown',
-                                'ip_version' => $ipResult['ip_version'] ?? 'v4',
-                                'thumbprint_sha256' => $ipResult['thumbprint_sha256'] ?? null,
-                                'issuer' => $ipResult['issuer'] ?? null,
-                                'expiry_date' => $ipResult['expiry_date'] ?? null,
-                                'error' => $ipResult['error'] ?? null,
-                            ]);
+                        Log::info("CertHealthService: External Cert check successful for {$domain->name}");
+                        
+                        foreach (['internal', 'external'] as $type) {
+                            if (isset($results[$type]) && is_array($results[$type])) {
+                                foreach ($results[$type] as $ipResult) {
+                                    CertHealthLog::create([
+                                        'domain_id' => $domain->id,
+                                        'check_type' => $type,
+                                        'ip_address' => $ipResult['ip_address'] ?? 'Unknown',
+                                        'ip_version' => $ipResult['ip_version'] ?? 'v4',
+                                        'thumbprint_sha256' => $ipResult['thumbprint_sha256'] ?? null,
+                                        'issuer' => $ipResult['issuer'] ?? null,
+                                        'expiry_date' => $ipResult['expiry_date'] ?? null,
+                                        'error' => $ipResult['error'] ?? null,
+                                    ]);
+                                }
+                            }
                         }
                         $domain->update(['last_cert_check' => now()]);
                         return;
                     }
                 }
-                Log::warning("CertHealthService: External Cert poller at {$externalUrl} returned status " . $response->status() . " for {$domain->name}. Body: " . $response->body() . ". Falling back to local.");
+                Log::error("CertHealthService: External Cert poller at {$externalUrl} returned status " . $response->status() . " for {$domain->name}. Body: " . $response->body());
             } catch (\Exception $e) {
-                Log::warning("CertHealthService: External Cert poller at {$externalUrl} error for {$domain->name}: " . $e->getMessage() . ". Falling back to local.");
+                Log::error("CertHealthService: External Cert poller at {$externalUrl} error for {$domain->name}: " . $e->getMessage());
             }
-        } else {
-            Log::info("CertHealthService: No external poller configured, performing local check for {$domain->name}");
+            return; // Don't fall back to local if external poller is configured but failed
         }
 
-        // Resolve A and AAAA records
-        $ips = [];
+        // NO External Poller - Perform local (internal) check only
+        Log::info("CertHealthService: No external poller, performing local internal check for {$domain->name}");
         
-        // 1. Try configured resolver
-        if ($resolver) {
-            Log::debug("CertHealthService: Resolving {$domain->name} using resolver {$resolver}");
-            $ips = array_merge($ips, $this->resolveIps($domain->name, $resolver));
-        }
-
-        // 2. Always also try local system DNS (internal DNS)
-        Log::debug("CertHealthService: Resolving {$domain->name} using local system DNS");
+        $ips = [];
+        // Resolve using local system DNS (internal DNS)
         $ips = array_merge($ips, $this->resolveIps($domain->name, null));
 
         // Deduplicate IPs
@@ -81,10 +84,6 @@ class CertHealthService
             $uniqueIps[$ipData['ip']] = $ipData;
         }
         $ips = array_values($uniqueIps);
-
-        if (empty($ips)) {
-            Log::warning("CertHealthService: No IPs resolved for {$domain->name} via any method.");
-        }
 
         foreach ($ips as $ipData) {
             $this->checkIp($domain, $ipData['ip'], $ipData['version']);
@@ -168,6 +167,7 @@ class CertHealthService
 
         CertHealthLog::create([
             'domain_id' => $domain->id,
+            'check_type' => 'internal',
             'ip_address' => $ip,
             'ip_version' => $version,
             'thumbprint_sha256' => $thumbprint,

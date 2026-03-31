@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class CertHealthLog extends Model
 {
-    protected $fillable = ['domain_id', 'ip_address', 'ip_version', 'thumbprint_sha256', 'issuer', 'expiry_date', 'error'];
+    protected $fillable = ['domain_id', 'check_type', 'ip_address', 'ip_version', 'thumbprint_sha256', 'issuer', 'expiry_date', 'error'];
 
     protected $casts = [
         'expiry_date' => 'datetime',

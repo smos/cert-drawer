@@ -34,7 +34,6 @@ if (!$input) {
 
 $domain = $input['domain'] ?? '';
 $type = $input['type'] ?? ''; // 'dns' or 'certificate'
-$resolver = $input['resolver'] ?? null;
 
 if (empty($domain) || !in_array($type, ['dns', 'certificate'])) {
     http_response_code(400);
@@ -52,15 +51,29 @@ if (!preg_match('/^[a-z0-9.-]+$/i', $domain)) {
 
 // 3. Perform the requested check
 if ($type === 'dns') {
+    // For DNS, we still support a single resolver or multiple
+    $resolver = $input['resolver'] ?? null;
     performDnsCheck($domain, $resolver);
 } else {
-    performCertCheck($domain, $resolver);
+    // For Certificate, we now support multiple resolvers (e.g. internal and external)
+    $resolvers = $input['resolvers'] ?? null;
+    if (is_array($resolvers)) {
+        $allResults = [];
+        foreach ($resolvers as $key => $resolverIp) {
+            $allResults[$key] = performCertCheck($domain, $resolverIp, true);
+        }
+        echo json_encode($allResults);
+    } else {
+        // Legacy single-resolver support
+        $resolver = $input['resolver'] ?? null;
+        performCertCheck($domain, $resolver);
+    }
 }
 
 // --- HELPERS ---
 
 function getResolverPart($resolver) {
-    if (!$resolver) return "";
+    if (!$resolver || $resolver === 'external') return "";
     return "@" . escapeshellarg($resolver);
 }
 
@@ -74,12 +87,6 @@ function performDnsCheck($domain, $resolver) {
         $result = 0;
         exec("dig {$resPart} +noall +answer " . escapeshellarg($domain) . " " . escapeshellarg($t) . " +tries=2 +time=2", $output, $result);
         
-        // Fallback to local DNS if resolver failed OR returned no results
-        if (($result !== 0 || empty($output)) && $resolver) {
-            $output = [];
-            exec("dig +noall +answer " . escapeshellarg($domain) . " " . escapeshellarg($t) . " +tries=2 +time=2", $output);
-        }
-
         $cleaned = [];
         foreach ($output as $line) {
             $parts = preg_split('/\s+/', trim($line));
@@ -97,10 +104,6 @@ function performDnsCheck($domain, $resolver) {
     // DMARC
     $dmarcOut = [];
     exec("dig {$resPart} +noall +answer _dmarc." . escapeshellarg($domain) . " TXT +tries=2 +time=2", $dmarcOut, $resD);
-    if ((empty($dmarcOut) || $resD !== 0) && $resolver) {
-        $dmarcOut = [];
-        exec("dig +noall +answer _dmarc." . escapeshellarg($domain) . " TXT +tries=2 +time=2", $dmarcOut);
-    }
     
     $dmarcValues = [];
     foreach ($dmarcOut as $line) {
@@ -119,10 +122,6 @@ function performDnsCheck($domain, $resolver) {
         $fqdn = "{$selector}._domainkey.{$domain}";
         $out = [];
         exec("dig {$resPart} +noall +answer " . escapeshellarg($fqdn) . " TXT +tries=2 +time=2", $out, $resK);
-        if ((empty($out) || $resK !== 0) && $resolver) {
-            $out = [];
-            exec("dig +noall +answer " . escapeshellarg($fqdn) . " TXT +tries=2 +time=2", $out);
-        }
         foreach ($out as $line) {
             $parts = preg_split('/\s+/', trim($line));
             if (count($parts) >= 5 && strtoupper($parts[3]) === 'TXT') {
@@ -137,7 +136,7 @@ function performDnsCheck($domain, $resolver) {
     echo json_encode($records);
 }
 
-function performCertCheck($domain, $resolver) {
+function performCertCheck($domain, $resolver, $returnOnly = false) {
     $ips = [];
     $resPart = getResolverPart($resolver);
     
@@ -145,10 +144,6 @@ function performCertCheck($domain, $resolver) {
     $out4 = [];
     $res4 = 0;
     exec("dig {$resPart} +short " . escapeshellarg($domain) . " A +tries=2 +time=2", $out4, $res4);
-    if (($res4 !== 0 || empty($out4)) && $resolver) { 
-        $out4 = []; 
-        exec("dig +short " . escapeshellarg($domain) . " A +tries=2 +time=2", $out4); 
-    }
     
     foreach (array_filter(array_map('trim', $out4)) as $ip) {
         if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) $ips[] = ['ip' => $ip, 'version' => 'v4'];
@@ -158,10 +153,6 @@ function performCertCheck($domain, $resolver) {
     $out6 = [];
     $res6 = 0;
     exec("dig {$resPart} +short " . escapeshellarg($domain) . " AAAA +tries=2 +time=2", $out6, $res6);
-    if (($res6 !== 0 || empty($out6)) && $resolver) { 
-        $out6 = []; 
-        exec("dig +short " . escapeshellarg($domain) . " AAAA +tries=2 +time=2", $out6); 
-    }
 
     foreach (array_filter(array_map('trim', $out6)) as $ip) {
         if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) $ips[] = ['ip' => $ip, 'version' => 'v6'];
@@ -172,6 +163,7 @@ function performCertCheck($domain, $resolver) {
         $results[] = checkSsl($domain, $ipData['ip'], $ipData['version']);
     }
 
+    if ($returnOnly) return $results;
     echo json_encode($results);
 }
 
