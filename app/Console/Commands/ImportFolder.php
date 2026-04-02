@@ -65,26 +65,29 @@ class ImportFolder extends Command
                 $content = file_get_contents($file);
 
                 if ($ext === 'cer' || $ext === 'crt') {
+                    $content = $service->ensurePem($content);
                     $info = $service->getCertInfo($content);
                     if ($info) {
                         $certData['cert'] = $content;
                         // Robust CN extraction
                         $subject = $info['subject'] ?? [];
                         $certData['commonName'] = $subject['commonName'] ?? $subject['CN'] ?? $certData['commonName'];
-                        
+
                         $certData['sans'] = array_unique(array_merge($certData['sans'], $service->extractSansFromCert($info)));
                         $certData['expiry'] = isset($info['validTo_time_t']) ? date('Y-m-d H:i:s', $info['validTo_time_t']) : null;
                         $certData['issuer'] = $info['issuer']['CN'] ?? 'Unknown';
                         $certData['is_ca'] = (isset($info['extensions']['basicConstraints']) && str_contains($info['extensions']['basicConstraints'], 'CA:TRUE'));
                     }
                 } elseif ($ext === 'csr') {
+                    $content = $service->ensureCsrPem($content);
                     $certData['csr'] = $content;
                     $info = $service->getCertInfoFromCsr($content);
                     if ($info) {
                         $certData['commonName'] = $info['commonName'] ?? $info['CN'] ?? $certData['commonName'];
                         $certData['sans'] = array_unique(array_merge($certData['sans'], $service->extractSansFromCsr($content)));
                     }
-                } elseif ($ext === 'key') {
+                }
+ elseif ($ext === 'key') {
                     $certData['key'] = $content;
                 } elseif ($ext === 'pfx' && $pfxPassword) {
                     try {

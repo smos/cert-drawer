@@ -373,6 +373,7 @@ class DomainController extends Controller
         ]);
 
         $certData = file_get_contents($request->file('certificate_file')->getRealPath());
+        $certData = $this->certService->ensurePem($certData);
         $info = $this->certService->getCertInfo($certData);
 
         if (!$info) {

@@ -99,8 +99,42 @@ keyUsage = critical, digitalSignature, cRLSign, keyCertSign
         ];
     }
 
+    public function ensurePem(string $data): string
+    {
+        if (str_contains($data, '-----BEGIN CERTIFICATE-----')) {
+            return $data;
+        }
+
+        // Try to wrap it as PEM and see if OpenSSL can read it
+        $pem = "-----BEGIN CERTIFICATE-----\n" . chunk_split(base64_encode($data), 64) . "-----END CERTIFICATE-----\n";
+        
+        if (@openssl_x509_read($pem)) {
+            return $pem;
+        }
+
+        return $data;
+    }
+
+    public function ensureCsrPem(string $data): string
+    {
+        if (str_contains($data, '-----BEGIN CERTIFICATE REQUEST-----')) {
+            return $data;
+        }
+
+        // Try to wrap it as PEM
+        $pem = "-----BEGIN CERTIFICATE REQUEST-----\n" . chunk_split(base64_encode($data), 64) . "-----END CERTIFICATE REQUEST-----\n";
+        
+        if (@openssl_csr_get_subject($pem)) {
+            return $pem;
+        }
+
+        return $data;
+    }
+
     public function signCsr(string $csrPem, string $issuerCertPem, string $issuerKeyPem, int $days = 365, bool $isCa = false, array $altNames = [])
     {
+        $csrPem = $this->ensureCsrPem($csrPem);
+        $issuerCertPem = $this->ensurePem($issuerCertPem);
         $privKey = openssl_pkey_get_private($issuerKeyPem);
         $issuerCert = openssl_x509_read($issuerCertPem);
 
@@ -228,6 +262,8 @@ subjectAltName = @alt_names
 
     public function generatePfx(string $cert, string $privateKey, string $password, array $chain = [])
     {
+        $cert = $this->ensurePem($cert);
+        $chain = array_map([$this, 'ensurePem'], $chain);
         if (openssl_pkcs12_export($cert, $pfxOut, $privateKey, $password, ['extracerts' => $chain])) {
             return $pfxOut;
         }
@@ -237,6 +273,8 @@ subjectAltName = @alt_names
 
     public function generateLegacyPfx(string $cert, string $privateKey, string $password, array $chain = [])
     {
+        $cert = $this->ensurePem($cert);
+        $chain = array_map([$this, 'ensurePem'], $chain);
         $tmpCert = tempnam(sys_get_temp_dir(), 'cert_');
         $tmpKey = tempnam(sys_get_temp_dir(), 'key_');
         $tmpPfx = tempnam(sys_get_temp_dir(), 'pfx_');
@@ -310,11 +348,13 @@ subjectAltName = @alt_names
 
     public function getCertInfo(string $certPem)
     {
+        $certPem = $this->ensurePem($certPem);
         return @openssl_x509_parse($certPem);
     }
 
     public function getCertInfoFromCsr(string $csrPem)
     {
+        $csrPem = $this->ensureCsrPem($csrPem);
         return @openssl_csr_get_subject($csrPem, false);
     }
 
@@ -334,6 +374,7 @@ subjectAltName = @alt_names
 
     public function extractSansFromCsr(string $csrPem)
     {
+        $csrPem = $this->ensureCsrPem($csrPem);
         $tmp = tempnam(sys_get_temp_dir(), 'csr_');
         file_put_contents($tmp, $csrPem);
         
@@ -353,6 +394,7 @@ subjectAltName = @alt_names
 
     public function extractThumbprint(string $certPem, string $algo = 'sha1')
     {
+        $certPem = $this->ensurePem($certPem);
         $res = @openssl_x509_read($certPem);
         if (!$res) return null;
         
@@ -364,6 +406,7 @@ subjectAltName = @alt_names
 
     public function extractSubjectKeyIdentifier(string $certPem)
     {
+        $certPem = $this->ensurePem($certPem);
         $info = $this->getCertInfo($certPem);
         $skid = $info['extensions']['subjectKeyIdentifier'] ?? null;
         if ($skid) {
@@ -374,6 +417,7 @@ subjectAltName = @alt_names
 
     public function extractAuthorityKeyIdentifier(string $certPem)
     {
+        $certPem = $this->ensurePem($certPem);
         $info = $this->getCertInfo($certPem);
         $akid = $info['extensions']['authorityKeyIdentifier'] ?? null;
         if ($akid) {
@@ -387,12 +431,14 @@ subjectAltName = @alt_names
 
     public function extractFullSubjectDn(string $certPem)
     {
+        $certPem = $this->ensurePem($certPem);
         $info = $this->getCertInfo($certPem);
         return $info ? json_encode($info['subject']) : null;
     }
 
     public function extractFullIssuerDn(string $certPem)
     {
+        $certPem = $this->ensurePem($certPem);
         $info = $this->getCertInfo($certPem);
         return $info ? json_encode($info['issuer']) : null;
     }

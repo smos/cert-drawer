@@ -391,21 +391,22 @@ class CertificateController extends Controller
             'certificate' => 'required|string',
         ]);
 
+        $certData = $this->certService->ensurePem($request->input('certificate'));
         $path = "certificates/" . $certificate->domain->name . "/" . $certificate->created_at->format('Y-m-d_H-i-s');
-        Storage::disk('local')->put($path . "/certificate.cer", $request->input('certificate'));
+        Storage::disk('local')->put($path . "/certificate.cer", $certData);
 
-        $certInfo = $this->certService->getCertInfo($request->input('certificate'));
+        $certInfo = $this->certService->getCertInfo($certData);
         $expiry = isset($certInfo['validTo_time_t']) ? date('Y-m-d H:i:s', $certInfo['validTo_time_t']) : null;
         $issuer = $certInfo['issuer']['CN'] ?? 'Unknown';
 
         $certificate->update([
-            'certificate' => $request->input('certificate'),
+            'certificate' => $certData,
             'status' => 'issued',
             'request_type' => 'manual',
             'expiry_date' => $expiry,
             'issuer' => $issuer,
-            'thumbprint_sha1' => $this->certService->extractThumbprint($request->input('certificate'), 'sha1'),
-            'thumbprint_sha256' => $this->certService->extractThumbprint($request->input('certificate'), 'sha256'),
+            'thumbprint_sha1' => $this->certService->extractThumbprint($certData, 'sha1'),
+            'thumbprint_sha256' => $this->certService->extractThumbprint($certData, 'sha256'),
         ]);
 
         AuditLog::log('cert_fulfill_manual', "Fulfilled certificate manually for domain: {$certificate->domain->name}");
