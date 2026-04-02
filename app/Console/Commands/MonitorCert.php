@@ -123,12 +123,18 @@ class MonitorCert extends Command
                 }
 
                 if ($hasChange) {
-                    $changes[] = [
-                        'domain' => $newLog->domain,
-                        'ip' => $newLog->ip_address,
-                        'old' => $oldLog->toArray(),
-                        'new' => $newLog->toArray(),
-                    ];
+                    // Ignore transitions to/from timeout as they can be spurious
+                    $isNewTimeout = $newLog->error && (stripos($newLog->error, 'timed out') !== false || stripos($newLog->error, '(110)') !== false);
+                    $isOldTimeout = $oldLog->error && (stripos($oldLog->error, 'timed out') !== false || stripos($oldLog->error, '(110)') !== false);
+
+                    if (!$isNewTimeout && !$isOldTimeout) {
+                        $changes[] = [
+                            'domain' => $newLog->domain,
+                            'ip' => $newLog->ip_address,
+                            'old' => $oldLog->toArray(),
+                            'new' => $newLog->toArray(),
+                        ];
+                    }
                 }
             }
 
