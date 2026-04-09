@@ -200,10 +200,7 @@ function checkSsl($host, $ip, $version) {
             if ($info) {
                 $res['issuer'] = $info['issuer']['CN'] ?? 'Unknown';
                 $res['expiry_date'] = date('Y-m-d H:i:s', $info['validTo_time_t']);
-                openssl_x509_export($cert, $pem);
-                $res['thumbprint_sha256'] = hash('sha256', base64_decode(
-                    preg_replace('/\-+BEGIN CERTIFICATE\-+|\-+END CERTIFICATE\-+|\n|\r/', '', $pem)
-                ));
+                $res['thumbprint_sha256'] = openssl_x509_fingerprint($cert, 'sha256');
             }
         }
         fclose($fp);

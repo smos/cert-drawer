@@ -10,7 +10,16 @@ class Certificate extends Model
     protected $fillable = [
         'domain_id', 'issuer_certificate_id', 'request_type', 'csr', 'certificate', 
         'private_key', 'pfx_password', 'issuer', 'expiry_date', 'status',
-        'thumbprint_sha1', 'thumbprint_sha256', 'metadata', 'is_ca', 'archived_at'
+        'thumbprint_sha1', 'thumbprint_sha256', 'metadata', 'is_ca', 'archived_at',
+        'serial_number'
+    ];
+
+    protected $hidden = [
+        'private_key', 'pfx_password'
+    ];
+
+    protected $appends = [
+        'has_private_key', 'has_pfx_password'
     ];
 
     protected $casts = [
@@ -19,6 +28,16 @@ class Certificate extends Model
         'is_ca' => 'boolean',
         'archived_at' => 'datetime',
     ];
+
+    public function getHasPrivateKeyAttribute(): bool
+    {
+        return !empty($this->private_key);
+    }
+
+    public function getHasPfxPasswordAttribute(): bool
+    {
+        return !empty($this->pfx_password);
+    }
 
     public function domain(): BelongsTo
     {

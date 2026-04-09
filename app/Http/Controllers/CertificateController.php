@@ -392,6 +392,11 @@ class CertificateController extends Controller
         ]);
 
         $certData = $this->certService->ensurePem($request->input('certificate'));
+
+        if ($certificate->csr && !$this->certService->comparePublicKeys($certificate->csr, $certData)) {
+            return response()->json(['success' => false, 'message' => 'The uploaded certificate does not match the public key of the CSR.'], 400);
+        }
+
         $path = "certificates/" . $certificate->domain->name . "/" . $certificate->created_at->format('Y-m-d_H-i-s');
         Storage::disk('local')->put($path . "/certificate.cer", $certData);
 

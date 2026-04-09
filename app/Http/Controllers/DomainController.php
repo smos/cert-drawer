@@ -402,17 +402,42 @@ class DomainController extends Controller
         if ($existing) {
             return back()->withErrors(['error' => "Certificate with thumbprint {$thumbprint} already exists for domain {$cn}."]);
         }
-        
-        $certificate = $domain->certificates()->create([
-            'request_type' => 'manual',
-            'certificate' => $certData,
-            'status' => 'issued',
-            'expiry_date' => isset($info['validTo_time_t']) ? date('Y-m-d H:i:s', $info['validTo_time_t']) : null,
-            'issuer' => $info['issuer']['CN'] ?? 'Unknown',
-            'is_ca' => $isCa,
-            'thumbprint_sha1' => $thumbprint,
-            'thumbprint_sha256' => $this->certService->extractThumbprint($certData, 'sha256'),
-        ]);
+
+        // Check if there is an open CSR for THIS domain that matches the public key
+        $matchingCsr = Certificate::where('domain_id', $domain->id)
+            ->where('status', 'requested')
+            ->whereNotNull('csr')
+            ->get()
+            ->filter(function($c) use ($certData) {
+                return $this->certService->comparePublicKeys($c->csr, $certData);
+            })
+            ->first();
+
+        if ($matchingCsr) {
+            $matchingCsr->update([
+                'certificate' => $certData,
+                'status' => 'issued',
+                'expiry_date' => isset($info['validTo_time_t']) ? date('Y-m-d H:i:s', $info['validTo_time_t']) : null,
+                'issuer' => $info['issuer']['CN'] ?? 'Unknown',
+                'is_ca' => $isCa,
+                'thumbprint_sha1' => $thumbprint,
+                'thumbprint_sha256' => $this->certService->extractThumbprint($certData, 'sha256'),
+                'serial_number' => $this->certService->extractSerialNumber($certData),
+            ]);
+            $certificate = $matchingCsr;
+        } else {
+            $certificate = $domain->certificates()->create([
+                'request_type' => 'manual',
+                'certificate' => $certData,
+                'status' => 'issued',
+                'expiry_date' => isset($info['validTo_time_t']) ? date('Y-m-d H:i:s', $info['validTo_time_t']) : null,
+                'issuer' => $info['issuer']['CN'] ?? 'Unknown',
+                'is_ca' => $isCa,
+                'thumbprint_sha1' => $thumbprint,
+                'thumbprint_sha256' => $this->certService->extractThumbprint($certData, 'sha256'),
+                'serial_number' => $this->certService->extractSerialNumber($certData),
+            ]);
+        }
 
         $path = "certificates/" . $domain->name . "/" . $certificate->created_at->format('Y-m-d_H-i-s');
         \Illuminate\Support\Facades\Storage::disk('local')->put($path . "/certificate.cer", $certData);
@@ -463,25 +488,49 @@ class DomainController extends Controller
             return back()->withErrors(['error' => "Certificate with thumbprint {$thumbprint} already exists for domain {$cn}."]);
         }
         
-        // If domain already exists, check access
         if ($domain->wasRecentlyCreated === false) {
             if (!Auth::user()->canAccess($domain)) {
                 return back()->withErrors(['error' => 'You do not have permission to update this domain.']);
             }
         }
-        
-        $certificate = $domain->certificates()->create([
-            'request_type' => 'manual',
-            'certificate' => $res['cert'],
-            'private_key' => encrypt($res['private_key']),
-            'pfx_password' => encrypt($request->input('password')),
-            'status' => 'issued',
-            'expiry_date' => isset($res['info']['validTo_time_t']) ? date('Y-m-d H:i:s', $res['info']['validTo_time_t']) : null,
-            'issuer' => $res['info']['issuer']['CN'] ?? 'Unknown',
-            'is_ca' => $isCa,
-            'thumbprint_sha1' => $thumbprint,
-            'thumbprint_sha256' => $this->certService->extractThumbprint($res['cert'], 'sha256'),
-        ]);
+
+        // Check if there is an open CSR for THIS domain that matches the public key
+        $matchingCsr = Certificate::where('domain_id', $domain->id)
+            ->where('status', 'requested')
+            ->whereNotNull('csr')
+            ->get()
+            ->filter(function($c) use ($res) {
+                return $this->certService->comparePublicKeys($c->csr, $res['cert']);
+            })
+            ->first();
+
+        if ($matchingCsr) {
+            $matchingCsr->update([
+                'certificate' => $res['cert'],
+                'private_key' => encrypt($res['private_key']),
+                'pfx_password' => encrypt($request->input('password')),
+                'status' => 'issued',
+                'expiry_date' => isset($res['info']['validTo_time_t']) ? date('Y-m-d H:i:s', $res['info']['validTo_time_t']) : null,
+                'issuer' => $res['info']['issuer']['CN'] ?? 'Unknown',
+                'is_ca' => $isCa,
+                'thumbprint_sha1' => $thumbprint,
+                'thumbprint_sha256' => $this->certService->extractThumbprint($res['cert'], 'sha256'),
+            ]);
+            $certificate = $matchingCsr;
+        } else {
+            $certificate = $domain->certificates()->create([
+                'request_type' => 'manual',
+                'certificate' => $res['cert'],
+                'private_key' => encrypt($res['private_key']),
+                'pfx_password' => encrypt($request->input('password')),
+                'status' => 'issued',
+                'expiry_date' => isset($res['info']['validTo_time_t']) ? date('Y-m-d H:i:s', $res['info']['validTo_time_t']) : null,
+                'issuer' => $res['info']['issuer']['CN'] ?? 'Unknown',
+                'is_ca' => $isCa,
+                'thumbprint_sha1' => $thumbprint,
+                'thumbprint_sha256' => $this->certService->extractThumbprint($res['cert'], 'sha256'),
+            ]);
+        }
 
         $path = "certificates/" . $domain->name . "/" . $certificate->created_at->format('Y-m-d_H-i-s');
         \Illuminate\Support\Facades\Storage::disk('local')->put($path . "/certificate.cer", $res['cert']);

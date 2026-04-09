@@ -17,4 +17,9 @@ class CertHealthLog extends Model
     {
         return $this->belongsTo(Domain::class);
     }
+
+    public function certificate(): BelongsTo
+    {
+        return $this->belongsTo(Certificate::class, 'thumbprint_sha256', 'thumbprint_sha256');
+    }
 }

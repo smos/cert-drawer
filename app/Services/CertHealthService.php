@@ -154,10 +154,7 @@ class CertHealthService
                     $expiry = date('Y-m-d H:i:s', $info['validTo_time_t']);
                     
                     // Generate SHA256 Thumbprint
-                    openssl_x509_export($cert, $pem);
-                    $thumbprint = hash('sha256', base64_decode(
-                        preg_replace('/\-+BEGIN CERTIFICATE\-+|\-+END CERTIFICATE\-+|\n|\r/', '', $pem)
-                    ));
+                    $thumbprint = openssl_x509_fingerprint($cert, 'sha256');
                 }
             }
             fclose($fp);

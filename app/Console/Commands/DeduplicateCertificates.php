@@ -16,12 +16,12 @@ class DeduplicateCertificates extends Command
         $dryRun = $this->option('dry-run');
         $disk = Storage::disk('local');
 
-        // Group by domain and thumbprint to find duplicates
-        // Note: We only care about issued certificates with thumbprints
-        $duplicates = Certificate::whereNotNull('thumbprint_sha1')
+        // Group by serial number and issuer to find duplicates
+        $duplicates = Certificate::whereNotNull('serial_number')
+            ->whereNotNull('issuer')
             ->get()
             ->groupBy(function($cert) {
-                return $cert->domain_id . '_' . $cert->thumbprint_sha1;
+                return $cert->issuer . '_' . $cert->serial_number;
             })
             ->filter(function($group) {
                 return $group->count() > 1;

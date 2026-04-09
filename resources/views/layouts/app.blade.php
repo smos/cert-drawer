@@ -307,7 +307,7 @@
             return colors[sum % colors.length];
         }
 
-        function openDrawer(domainId) {
+        function openDrawer(domainId, certIdToOpen = null) {
             fetch(`/domains/${domainId}`)
                 .then(res => {
                     if (!res.ok) throw new Error('Network response was not ok');
@@ -318,6 +318,10 @@
                         renderDrawer(data.domain, data.global_groups, data.is_admin, data.is_ca_domain);
                         drawer.classList.add('open');
                         overlay.classList.add('active');
+
+                        if (certIdToOpen) {
+                            showCertificateDetails(certIdToOpen);
+                        }
                     } catch (e) {
                         console.error('Render Error:', e);
                         alert('Error rendering drawer: ' + e.message);
@@ -327,6 +331,16 @@
                     console.error('Fetch Error:', err);
                     alert('Error loading domain details: ' + err.message);
                 });
+        }
+
+        window.onload = function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const openDomainId = urlParams.get('open_domain');
+            const openCertId = urlParams.get('open_cert');
+
+            if (openDomainId) {
+                openDrawer(openDomainId, openCertId);
+            }
         }
 
         function closeDrawer() {
@@ -517,12 +531,14 @@
                                     ` : ''}
                                     ${c.certificate ? `
                                         <a href="/certificates/${c.id}/download/cert" class="btn btn-sm">Download Cert</a>
-                                        ${c.pfx_password ? 
-                                            `<button class="btn btn-sm" onclick="downloadPfx(${c.id})">Download PFX</button>
-                                             <button class="btn btn-sm" onclick="downloadLegacyPfx(${c.id})" style="background:#e67e22; color:white;">Legacy PFX</button>` : 
-                                            `<button class="btn btn-sm" onclick="promptPfx(${c.id})">Generate PFX</button>`
-                                        }
-                                        ${c.private_key ? `<button class="btn btn-sm" onclick="downloadKey(${c.id})">Download Key</button>` : ''}
+                                        ${c.has_private_key ? `
+                                            ${c.has_pfx_password ? 
+                                                `<button class="btn btn-sm" onclick="downloadPfx(${c.id})">Download PFX</button>
+                                                 <button class="btn btn-sm" onclick="downloadLegacyPfx(${c.id})" style="background:#e67e22; color:white;">Legacy PFX</button>` : 
+                                                `<button class="btn btn-sm" onclick="promptPfx(${c.id})">Generate PFX</button>`
+                                            }
+                                            <button class="btn btn-sm" onclick="downloadKey(${c.id})">Download Key</button>
+                                        ` : ''}
                                     ` : `
                                         <button class="btn btn-sm" onclick="uploadCert(${c.id})">Upload Cert</button>
                                         <button class="btn btn-sm" style="background: #e74c3c; color: white;" onclick="deleteCsr(${c.id}, ${domain.id})">Delete CSR</button>

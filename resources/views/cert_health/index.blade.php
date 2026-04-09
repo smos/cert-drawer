@@ -98,7 +98,20 @@
                                                     @else
                                                         <span style="color: #27ae60;">&check;</span> 
                                                         <small style="color: #666;">
-                                                            <code>{{ substr($log->thumbprint_sha256, 0, 8) }}...</code> 
+                                                            @if($log->certificate)
+                                                                <a href="{{ route('domains.index', ['open_domain' => $log->certificate->domain_id, 'open_cert' => $log->certificate->id]) }}" style="color: inherit; text-decoration: underline dotted;">
+                                                                    <code>{{ substr($log->thumbprint_sha256, 0, 8) }}...</code>
+                                                                </a>
+                                                                @if($log->certificate->domain_id !== $domain->id)
+                                                                    <span style="font-size: 0.7rem; color: #888;">({{ $log->certificate->domain->name }})</span>
+                                                                @endif
+                                                            @else
+                                                                <code>{{ substr($log->thumbprint_sha256, 0, 8) }}...</code>
+                                                                <form action="{{ route('cert-health.import-log', $log) }}" method="POST" style="display:inline; margin-left: 5px;">
+                                                                    @csrf
+                                                                    <button type="submit" class="btn btn-sm" style="padding: 0px 4px; font-size: 0.6rem; vertical-align: middle;" title="Import this certificate into database">Import</button>
+                                                                </form>
+                                                            @endif
                                                         </small>
                                                     @endif
                                                 </div>

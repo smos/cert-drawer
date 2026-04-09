@@ -88,7 +88,7 @@ keyUsage = critical, digitalSignature, cRLSign, keyCertSign
             "x509_extensions" => "v3_ca",
         ]);
 
-        openssl_x509_export($x509, $certOut);
+        openssl_x509_export($x509, $certOut, true);
         openssl_pkey_export($privKey, $keyOut);
         
         unlink($tmpConfigFile);
@@ -180,7 +180,7 @@ subjectAltName = @alt_names
             "x509_extensions" => $isCa ? "v3_ca" : "v3_req",
         ], rand(10000, 999999));
 
-        openssl_x509_export($x509, $certOut);
+        openssl_x509_export($x509, $certOut, true);
         unlink($tmpConfigFile);
 
         return $certOut;
@@ -398,10 +398,43 @@ subjectAltName = @alt_names
         $res = @openssl_x509_read($certPem);
         if (!$res) return null;
         
-        openssl_x509_export($res, $out, false);
-        $data = base64_decode(preg_replace('/\-+BEGIN CERTIFICATE\-+|-+END CERTIFICATE\-+|\r|\n/', '', $out));
-        
-        return hash($algo, $data);
+        return openssl_x509_fingerprint($res, $algo);
+    }
+
+    public function extractPublicKey(string $pem)
+    {
+        if (str_contains($pem, '-----BEGIN CERTIFICATE REQUEST-----')) {
+            $res = openssl_csr_get_public_key($pem);
+        } else {
+            $res = openssl_pkey_get_public($pem);
+        }
+
+        if (!$res) return null;
+
+        $details = openssl_pkey_get_details($res);
+        return $details['key'] ?? null;
+    }
+
+    public function comparePublicKeys(string $pem1, string $pem2): bool
+    {
+        $pub1 = $this->extractPublicKey($pem1);
+        $pub2 = $this->extractPublicKey($pem2);
+
+        if (!$pub1 || !$pub2) return false;
+
+        return trim($pub1) === trim($pub2);
+    }
+
+    public function extractSerialNumber(string $certPem)
+    {
+        $info = $this->getCertInfo($certPem);
+        return $info['serialNumber'] ?? null;
+    }
+
+    public function extractIssuer(string $certPem)
+    {
+        $info = $this->getCertInfo($certPem);
+        return $info['issuer']['CN'] ?? $info['issuer']['commonName'] ?? 'Unknown';
     }
 
     public function extractSubjectKeyIdentifier(string $certPem)
