@@ -45,6 +45,7 @@ Route::middleware('auth')->group(function () {
     Route::match(['get', 'post'], '/certificates/{certificate}/pfx', [CertificateController::class, 'generatePfx'])->name('certificates.pfx');
     Route::post('/certificates/{certificate}/legacy-pfx', [CertificateController::class, 'generateLegacyPfx'])->name('certificates.legacy-pfx');
     Route::post('/certificates/{certificate}/upload', [CertificateController::class, 'upload'])->name('certificates.upload');
+    Route::post('/certificates/{certificate}/fix-chain', [CertificateController::class, 'fixChain'])->name('certificates.fix-chain');
 
     Route::middleware('admin:auth')->group(function () {
         Route::get('/settings/auth', [\App\Http\Controllers\AuthController::class, 'index'])->name('auth.settings.index');

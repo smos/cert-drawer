@@ -112,11 +112,20 @@ class AutomationController extends Controller
 
                 $details = $exists ? $service->getCert($tempAuto, $certName) : null;
 
+                $latestCert = $domain->certificates()->where('status', 'issued')->latest()->first();
+                $chainWarning = "";
+                if ($latestCert) {
+                    $details = app(CertificateController::class)->show($latestCert)->getData();
+                    if ($details->chain_incomplete) {
+                        $chainWarning = "<div style='margin-top:10px; color:#856404; background:#fff3cd; padding:8px; border-radius:4px; border:1px solid #ffeeba;'>⚠️ <strong>Warning:</strong> The latest certificate for this domain has an incomplete chain. This may cause issues with device decryption/VPN services.</div>";
+                    }
+                }
+
                 return response()->json([
                     'success' => true,
                     'exists' => $exists,
                     'cert_name' => $certName,
-                    'message' => $exists ? "Certificate '{$certName}' already exists on device." : "Certificate '{$certName}' not found on device. It will be created."
+                    'message' => ($exists ? "Certificate '{$certName}' already exists on device." : "Certificate '{$certName}' not found on device. It will be created.") . $chainWarning
                 ]);
             }
 
@@ -132,11 +141,20 @@ class AutomationController extends Controller
                     }
                 }
 
+                $latestCert = $domain->certificates()->where('status', 'issued')->latest()->first();
+                $chainWarning = "";
+                if ($latestCert) {
+                    $details = app(CertificateController::class)->show($latestCert)->getData();
+                    if ($details->chain_incomplete) {
+                        $chainWarning = "<div style='margin-top:10px; color:#856404; background:#fff3cd; padding:8px; border-radius:4px; border:1px solid #ffeeba;'>⚠️ <strong>Warning:</strong> The latest certificate for this domain has an incomplete chain. This may cause issues with device decryption/VPN services.</div>";
+                    }
+                }
+
                 return response()->json([
                     'success' => true,
                     'exists' => $exists,
                     'cert_name' => $certName,
-                    'message' => $exists ? "Local certificate '{$certName}' already exists on Fortigate." : "Certificate '{$certName}' not found on Fortigate. It will be imported."
+                    'message' => ($exists ? "Local certificate '{$certName}' already exists on Fortigate." : "Certificate '{$certName}' not found on Fortigate. It will be imported.") . $chainWarning
                 ]);
             }
 
@@ -152,11 +170,20 @@ class AutomationController extends Controller
                     }
                 }
 
+                $latestCert = $domain->certificates()->where('status', 'issued')->latest()->first();
+                $chainWarning = "";
+                if ($latestCert) {
+                    $details = app(CertificateController::class)->show($latestCert)->getData();
+                    if ($details->chain_incomplete) {
+                        $chainWarning = "<div style='margin-top:10px; color:#856404; background:#fff3cd; padding:8px; border-radius:4px; border:1px solid #ffeeba;'>⚠️ <strong>Warning:</strong> The latest certificate for this domain has an incomplete chain. This may cause issues with device decryption/VPN services.</div>";
+                    }
+                }
+
                 return response()->json([
                     'success' => true,
                     'exists' => $exists,
                     'cert_name' => $certName,
-                    'message' => $exists ? "Certificate '{$certName}' already exists on Palo Alto." : "Certificate '{$certName}' not found on Palo Alto. It will be imported."
+                    'message' => ($exists ? "Certificate '{$certName}' already exists on Palo Alto." : "Certificate '{$certName}' not found on Palo Alto. It will be imported.") . $chainWarning
                 ]);
             }
 

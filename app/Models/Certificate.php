@@ -48,4 +48,28 @@ class Certificate extends Model
     {
         return $this->belongsTo(Certificate::class, 'issuer_certificate_id');
     }
+
+    public function linkIssuer(bool $download = true): bool
+    {
+        if ($this->issuer_certificate_id || !$this->certificate) return false;
+
+        $certService = app(\App\Services\CertificateService::class);
+        $allCas = Certificate::where('is_ca', true)->whereNotNull('certificate')->get();
+        
+        $issuer = $certService->findIssuer($this, $allCas);
+        if ($issuer) {
+            $this->update(['issuer_certificate_id' => $issuer->id]);
+            return true;
+        }
+
+        if ($download) {
+            $newCa = $certService->downloadAndImportIssuer($this);
+            if ($newCa) {
+                $this->update(['issuer_certificate_id' => $newCa->id]);
+                return true;
+            }
+        }
+
+        return false;
+    }
 }

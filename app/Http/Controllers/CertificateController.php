@@ -216,6 +216,8 @@ class CertificateController extends Controller
                 'thumbprint_sha256' => $this->certService->extractThumbprint($issuedCert, 'sha256'),
             ]);
 
+            $certificate->linkIssuer();
+
             AuditLog::log('cert_fulfill_adcs', "Fulfilled certificate via ADCS for domain: {$domain->name}");
 
             return response()->json(['success' => true, 'message' => 'Certificate issued by ADCS.']);
@@ -268,6 +270,8 @@ class CertificateController extends Controller
             'issuer' => $certificate->issuer,
             'expiry_date' => $certificate->expiry_date ? $certificate->expiry_date->toDateTimeString() : null,
             'metadata' => $certificate->metadata,
+            'chain_incomplete' => false,
+            'issuer_certificate_id' => $certificate->issuer_certificate_id,
         ];
 
         if ($certificate->certificate) {
@@ -281,6 +285,30 @@ class CertificateController extends Controller
             $details['full_subject'] = json_encode($info['subject'] ?? []);
             $details['thumbprint_sha1'] = $certificate->thumbprint_sha1;
             $details['thumbprint_sha256'] = $certificate->thumbprint_sha256;
+
+            // Check chain completeness (simplified for details view)
+            if (!$certificate->is_ca) {
+                if (!$certificate->issuer_certificate_id) {
+                    $details['chain_incomplete'] = true;
+                } else {
+                    $curr = $certificate;
+                    $safety = 0;
+                    $complete = false;
+                    while($curr && $curr->issuer_certificate_id && $safety < 10) {
+                        $safety++;
+                        $curr = Certificate::find($curr->issuer_certificate_id);
+                        if ($curr) {
+                            $sub = $this->certService->extractFullSubjectDn($curr->certificate);
+                            $iss = $this->certService->extractFullIssuerDn($curr->certificate);
+                            if ($sub === $iss) {
+                                $complete = true;
+                                break;
+                            }
+                        }
+                    }
+                    $details['chain_incomplete'] = !$complete;
+                }
+            }
         } elseif ($certificate->csr) {
             $details['type'] = 'CSR';
             $details['csr_body'] = $certificate->csr;
@@ -414,9 +442,24 @@ class CertificateController extends Controller
             'thumbprint_sha256' => $this->certService->extractThumbprint($certData, 'sha256'),
         ]);
 
+        $certificate->linkIssuer();
+
         AuditLog::log('cert_fulfill_manual', "Fulfilled certificate manually for domain: {$certificate->domain->name}");
 
         return response()->json($certificate);
+    }
+
+    public function fixChain(Certificate $certificate)
+    {
+        $this->authorizeAccess($certificate->domain);
+        
+        $linked = $certificate->linkIssuer(true);
+        
+        if ($linked) {
+            return response()->json(['success' => true, 'message' => 'Chain linked successfully. Missing certificates were downloaded.']);
+        } else {
+            return response()->json(['success' => false, 'message' => 'Could not find or download a matching issuer.']);
+        }
     }
 
     public function download(Certificate $certificate, $type)

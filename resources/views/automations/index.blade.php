@@ -32,7 +32,22 @@
         <tbody>
             @foreach($automations as $auto)
                 <tr style="border-bottom: 1px solid #eee;">
-                    <td style="padding: 12px 15px;"><strong>{{ $auto->domain->name }}</strong></td>
+                    <td style="padding: 12px 15px;">
+                        <strong>{{ $auto->domain->name }}</strong>
+                        @php
+                            $latestCert = $auto->domain->certificates()->where('status', 'issued')->latest()->first();
+                            $incomplete = false;
+                            if ($latestCert) {
+                                $details = app(App\Http\Controllers\CertificateController::class)->show($latestCert)->getData();
+                                if ($details->chain_incomplete) $incomplete = true;
+                            }
+                        @endphp
+                        @if($incomplete)
+                            <div style="font-size: 0.75rem; color: #856404; background: #fff3cd; padding: 2px 5px; border-radius: 3px; display: inline-block; margin-left: 10px;" title="This domain has an incomplete certificate chain (missing Root/Intermediate)">
+                                ⚠️ Incomplete Chain
+                            </div>
+                        @endif
+                    </td>
                     <td style="padding: 12px 15px;">
                         <span class="tag" style="background: #e9ecef; color: #495057; text-transform: uppercase; font-size: 0.7rem; font-weight: 600;">
                             {{ $auto->type }}

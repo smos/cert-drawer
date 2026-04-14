@@ -511,8 +511,11 @@
                                 <p>Status: <span class="tag">${c.status}</span></p>
                                 <p>Authority: <span style="background: ${caColor}; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">${caName}</span></p>
                                 ${c.chain_incomplete ? `
-                                    <div style="background: #fff3cd; color: #856404; border: 1px solid #ffeeba; padding: 8px; border-radius: 4px; font-size: 0.8rem; margin: 10px 0;">
-                                        ⚠️ <strong>Incomplete Chain:</strong> Root CA or intermediate is missing from Authorities.
+                                    <div style="background: #fff3cd; color: #856404; border: 1px solid #ffeeba; padding: 8px; border-radius: 4px; font-size: 0.8rem; margin: 10px 0; display: flex; justify-content: space-between; align-items: center;">
+                                        <div>
+                                            ⚠️ <strong>Incomplete Chain:</strong> Root CA or intermediate is missing from Authorities.
+                                        </div>
+                                        <button class="btn btn-sm" style="background: #f39c12; color: white;" onclick="fixChain(${c.id}, ${domain.id})">Fix Chain</button>
                                     </div>
                                 ` : ''}
                                 <p>Issuer: ${c.issuer || 'N/A'}</p>
@@ -1093,10 +1096,11 @@
         async function uploadCert(certId, domainId) {
             const certData = await textPrompt("Paste Certificate PEM here:");
             if (certData) {
-                            fetch(`/certificates/${certId}/upload`, {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json',                        'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                fetch(`/certificates/${certId}/upload`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': '{{ csrf_token() }}'
                     },
                     body: JSON.stringify({ certificate: certData })
                 })
@@ -1106,6 +1110,24 @@
                     openDrawer(domainId);
                 });
             }
+        }
+
+        function fixChain(certId, domainId) {
+            fetch(`/certificates/${certId}/fix-chain`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                }
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    alert(data.message);
+                    openDrawer(domainId);
+                } else {
+                    alert(data.message);
+                }
+            });
         }
 
         function passwordPrompt(title) {

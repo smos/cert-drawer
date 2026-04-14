@@ -176,6 +176,19 @@ class MonitorCert extends Command
                             'reason' => $reason,
                         ];
                         \Illuminate\Support\Facades\Cache::put($cacheKey, true, now()->endOfDay());
+
+                        // If the certificate is expired (days <= 0), trigger Palo Alto cleanup if configured
+                        if ($days <= 0) {
+                            $automations = $domain->automations()->where('type', 'paloalto')->get();
+                            foreach ($automations as $automation) {
+                                try {
+                                    $this->info("Triggering Palo Alto cleanup for {$domain->name} due to expiry...");
+                                    app(\App\Services\PaloAltoService::class)->cleanupExpiredCerts($automation, $domain->name);
+                                } catch (\Exception $e) {
+                                    $this->error("Palo Alto cleanup failed: " . $e->getMessage());
+                                }
+                            }
+                        }
                     }
                 }
             }

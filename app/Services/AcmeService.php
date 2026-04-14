@@ -133,6 +133,8 @@ class AcmeService
             'thumbprint_sha256' => $certService->extractThumbprint($issuedCert, 'sha256'),
         ]);
 
+        $certificate->linkIssuer();
+
         AuditLog::log('acme_fulfill_success', "Fulfilled ACME certificate for domain: {$certificate->domain->name}");
 
         $appPath = "certificates/" . $certificate->domain->name . "/" . $certificate->created_at->format('Y-m-d_H-i-s');

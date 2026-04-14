@@ -475,4 +475,101 @@ subjectAltName = @alt_names
         $info = $this->getCertInfo($certPem);
         return $info ? json_encode($info['issuer']) : null;
     }
+
+    public function extractAiaUrl(string $certPem): ?string
+    {
+        $info = $this->getCertInfo($certPem);
+        $aia = $info['extensions']['authorityInfoAccess'] ?? null;
+        if ($aia && preg_match('/CA Issuers - URI:(http[s]?:\/\/[^\s\n]+)/', $aia, $matches)) {
+            return $matches[1];
+        }
+        return null;
+    }
+
+    public function derToPem(string $derData): string
+    {
+        if (str_contains($derData, '-----BEGIN CERTIFICATE-----')) {
+            return $derData;
+        }
+
+        $tmpDer = tempnam(sys_get_temp_dir(), 'cert_der_');
+        file_put_contents($tmpDer, $derData);
+        
+        $cmd = "openssl x509 -inform DER -in " . escapeshellarg($tmpDer) . " -outform PEM 2>&1";
+        $pem = shell_exec($cmd);
+        
+        if (file_exists($tmpDer)) unlink($tmpDer);
+
+        if ($pem && str_contains($pem, '-----BEGIN CERTIFICATE-----')) {
+            return $pem;
+        }
+
+        return $this->ensurePem($derData);
+    }
+
+    public function downloadAndImportIssuer(\App\Models\Certificate $cert): ?\App\Models\Certificate
+    {
+        $url = $this->extractAiaUrl($cert->certificate);
+        if (!$url) return null;
+
+        try {
+            $response = \Illuminate\Support\Facades\Http::withoutVerifying()->get($url);
+            if (!$response->successful()) return null;
+
+            $pem = $this->derToPem($response->body());
+            $info = $this->getCertInfo($pem);
+            if (!$info) return null;
+
+            $commonName = $info['subject']['CN'] ?? 'Unknown CA';
+            $issuerName = $info['issuer']['CN'] ?? 'Unknown Issuer';
+            $thumbprint = $this->extractThumbprint($pem, 'sha256');
+
+            // Check if already exists by thumbprint
+            $existing = \App\Models\Certificate::where('thumbprint_sha256', $thumbprint)->first();
+            if ($existing) return $existing;
+
+            // Create a pseudo-domain for this CA if it doesn't exist
+            $domain = \App\Models\Domain::firstOrCreate(['name' => $commonName], [
+                'dns_monitored' => false,
+                'cert_monitored' => false,
+            ]);
+
+            $caCert = $domain->certificates()->create([
+                'certificate' => $pem,
+                'is_ca' => true,
+                'status' => 'issued',
+                'request_type' => 'manual',
+                'issuer' => $issuerName,
+                'expiry_date' => isset($info['validTo_time_t']) ? date('Y-m-d H:i:s', $info['validTo_time_t']) : null,
+                'thumbprint_sha1' => $this->extractThumbprint($pem, 'sha1'),
+                'thumbprint_sha256' => $thumbprint,
+                'serial_number' => $info['serialNumber'] ?? null,
+            ]);
+
+            // Recursively try to link/download its issuer
+            $caCert->linkIssuer();
+
+            return $caCert;
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error("Failed to download issuer for {$cert->id}: " . $e->getMessage());
+            return null;
+        }
+    }
+
+    public function findIssuer(\App\Models\Certificate $cert, $cas)
+    {
+        $akid = $this->extractAuthorityKeyIdentifier($cert->certificate);
+        if ($akid) {
+            $match = $cas->filter(function($ca) use ($akid) {
+                return $this->extractSubjectKeyIdentifier($ca->certificate) === $akid;
+            })->first();
+            if ($match) return $match;
+        }
+
+        // Fallback to Full DN matching
+        $issuerDn = $this->extractFullIssuerDn($cert->certificate);
+        return $cas->filter(function($ca) use ($issuerDn) {
+            return $this->extractFullSubjectDn($ca->certificate) === $issuerDn;
+        })->first();
+    }
 }

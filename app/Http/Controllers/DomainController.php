@@ -308,19 +308,7 @@ class DomainController extends Controller
 
     protected function findIssuer($cert, $cas)
     {
-        $akid = $this->certService->extractAuthorityKeyIdentifier($cert->certificate);
-        if ($akid) {
-            $match = $cas->filter(function($ca) use ($akid) {
-                return $this->certService->extractSubjectKeyIdentifier($ca->certificate) === $akid;
-            })->first();
-            if ($match) return $match;
-        }
-
-        // Fallback to Full DN matching
-        $issuerDn = $this->certService->extractFullIssuerDn($cert->certificate);
-        return $cas->filter(function($ca) use ($issuerDn) {
-            return $this->certService->extractFullSubjectDn($ca->certificate) === $issuerDn;
-        })->first();
+        return $this->certService->findIssuer($cert, $cas);
     }
 
     protected function rebuildAuthorityTree()
