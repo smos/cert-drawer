@@ -21,7 +21,8 @@ class DnsController extends Controller
 
         $logs = DnsLog::with('domain')->latest()->limit(50)->get();
 
-        return view('dns.health', compact('domains', 'logs'));
+        return view('dns.health', compact('domains', 'logs'))
+            ->with('containerClass', 'container-fluid');
     }
 
     public function runGlobalCheck(\App\Services\DnsService $dnsService)

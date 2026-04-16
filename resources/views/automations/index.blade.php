@@ -18,7 +18,7 @@
     <button class="btn btn-primary" onclick="openAddModal()">+ Add Automation</button>
 </div>
 
-<div style="background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); overflow: hidden;">
+<div class="table-responsive" style="background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); overflow: hidden;">
     <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
         <thead>
             <tr style="background: #f8f9fa; border-bottom: 2px solid #eee; text-align: left;">
@@ -73,10 +73,12 @@
                     </td>
                     <td style="padding: 12px 15px; text-align: right;">
                         <div style="display: flex; gap: 5px; justify-content: flex-end;">
+                            <button type="button" class="btn btn-sm" style="background: #2980b9; color: white;" onclick="runDryRun({{ $auto->id }})">Test</button>
                             <form action="{{ route('automations.run', $auto->id) }}" method="POST">
                                 @csrf
                                 <button type="submit" class="btn btn-sm btn-primary" onclick="return confirm('Upload and REPLACE certificate on device now?')">Run Now</button>
                             </form>
+                            <button type="button" class="btn btn-sm" style="background: #34495e; color: white;" onclick="openLogsModal({{ $auto->id }})">Logs</button>
                             <button type="button" class="btn btn-sm" style="background: #f39c12; color: white;" onclick="openEditModal({{ $auto->id }})">Edit</button>
                             <form action="{{ route('automations.destroy', $auto->id) }}" method="POST">
                                 @csrf
@@ -94,6 +96,28 @@
             @endif
         </tbody>
     </table>
+</div>
+
+<!-- Dry Run Results Modal -->
+<div id="dry-run-modal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:white; padding:30px; box-shadow:0 0 20px rgba(0,0,0,0.5); z-index:1001; border-radius:8px; width:700px; max-height: 90vh; overflow-y: auto;">
+    <h3>Automation Dry-Run Results</h3>
+    <div id="dry-run-content">
+        <p>Running check...</p>
+    </div>
+    <div style="margin-top: 20px; text-align: right;">
+        <button type="button" class="btn" style="background: #eee;" onclick="closeDryRunModal()">Close</button>
+    </div>
+</div>
+
+<!-- Logs Modal -->
+<div id="logs-modal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:white; padding:30px; box-shadow:0 0 20px rgba(0,0,0,0.5); z-index:1001; border-radius:8px; width:700px; max-height: 90vh; overflow-y: auto;">
+    <h3>Automation Activity Logs</h3>
+    <div id="logs-content">
+        <p>Loading logs...</p>
+    </div>
+    <div style="margin-top: 20px; text-align: right;">
+        <button type="button" class="btn" style="background: #eee;" onclick="closeLogsModal()">Close</button>
+    </div>
 </div>
 
 <!-- Modal -->
@@ -269,11 +293,127 @@
 
                 connectionTested = true;
                 document.getElementById('btn-to-step-2').disabled = false;
+                document.getElementById('btn-save').disabled = false;
+                updateStep2UI();
                 goToStep(1);
             }
         } catch (error) {
             alert('Error fetching automation data');
         }
+    }
+
+    async function runDryRun(id) {
+        document.getElementById('dry-run-modal').style.display = 'block';
+        const content = document.getElementById('dry-run-content');
+        content.innerHTML = '<p><em>Running dry-run check on device...</em></p>';
+
+        try {
+            const response = await fetch(`/automations/${id}/test`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                }
+            });
+            const data = await response.json();
+            
+            if (data.success) {
+                const s = data.status;
+                let html = `<div style="margin-bottom: 20px; padding: 15px; border-radius: 4px; border-left: 5px solid ${s.exists_on_device ? (s.needs_update ? '#f39c12' : '#27ae60') : '#e74c3c'}; background: #f8f9fa;">
+                    <strong>Device Cert Status:</strong> ${s.message}
+                </div>`;
+
+                if (s.details && s.details.local_cert && s.details.device_cert) {
+                    html += `<h4>Certificate Comparison:</h4>
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-bottom: 20px; border: 1px solid #eee;">
+                        <tr style="background: #f8f9fa;"><th style="padding: 5px; text-align: left; border: 1px solid #eee;">Property</th><th style="padding: 5px; text-align: left; border: 1px solid #eee;">Device</th><th style="padding: 5px; text-align: left; border: 1px solid #eee;">Local (Latest)</th></tr>
+                        <tr><td style="padding: 5px; border: 1px solid #eee;">Serial</td><td style="padding: 5px; border: 1px solid #eee; font-family: monospace;">${s.details.device_cert.serial || 'N/A'}</td><td style="padding: 5px; border: 1px solid #eee; font-family: monospace;">${s.details.local_cert.serial || 'N/A'}</td></tr>
+                        <tr><td style="padding: 5px; border: 1px solid #eee;">Thumbprint (SHA256)</td><td style="padding: 5px; border: 1px solid #eee; font-family: monospace;">${s.details.device_cert.thumbprint ? s.details.device_cert.thumbprint.substring(0, 16) + '...' : 'N/A'}</td><td style="padding: 5px; border: 1px solid #eee; font-family: monospace;">${s.details.local_cert.thumbprint ? s.details.local_cert.thumbprint.substring(0, 16) + '...' : 'N/A'}</td></tr>
+                        <tr><td style="padding: 5px; border: 1px solid #eee;">Expires</td><td style="padding: 5px; border: 1px solid #eee;">${s.details.device_cert.expiry || 'N/A'}</td><td style="padding: 5px; border: 1px solid #eee;">${s.details.local_cert.expiry || 'N/A'}</td></tr>
+                    </table>`;
+                }
+
+                if (s.details) {
+                    html += '<h4>Configuration Links:</h4>';
+                    if (s.details.profiles) {
+                        html += '<p><strong>SSL/TLS Profiles:</strong></p><ul>';
+                        for (const [name, info] of Object.entries(s.details.profiles)) {
+                            const marker = info.up_to_date ? '✅' : '❌';
+                            html += `<li>${name}: Current='${info.current_value}' ${marker}</li>`;
+                        }
+                        html += '</ul>';
+                    }
+                    if (s.details.decryption_rules) {
+                        html += '<p><strong>Decryption Rules:</strong></p><ul>';
+                        for (const [name, info] of Object.entries(s.details.decryption_rules)) {
+                            const marker = info.up_to_date ? '✅' : '❌';
+                            html += `<li>${name}: Current='${info.current_value}' ${marker}</li>`;
+                        }
+                        html += '</ul>';
+                    }
+                    if (s.details.vpn_ssl) {
+                        const marker = s.details.vpn_ssl.up_to_date ? '✅' : '❌';
+                        html += `<p><strong>SSL VPN:</strong> Current='${s.details.vpn_ssl.current_value}' ${marker}</p>`;
+                    }
+                    if (s.details.web_ui) {
+                        const marker = s.details.web_ui.up_to_date ? '✅' : '❌';
+                        html += `<p><strong>Admin Web UI:</strong> Current='${s.details.web_ui.current_value}' ${marker}</p>`;
+                    }
+                }
+                content.innerHTML = html;
+            } else {
+                content.innerHTML = `<p style="color: #c0392b;">Check failed: ${data.message}</p>`;
+            }
+        } catch (error) {
+            content.innerHTML = '<p style="color: #c0392b;">Error communicating with server.</p>';
+        }
+    }
+
+    function closeDryRunModal() {
+        document.getElementById('dry-run-modal').style.display = 'none';
+    }
+
+    async function openLogsModal(id) {
+        document.getElementById('logs-modal').style.display = 'block';
+        const content = document.getElementById('logs-content');
+        content.innerHTML = '<p><em>Loading activity logs...</em></p>';
+
+        try {
+            const response = await fetch(`/automations/${id}`);
+            const data = await response.json();
+            
+            if (data.success && data.logs) {
+                if (data.logs.length === 0) {
+                    content.innerHTML = '<p style="color: #666;">No activity logs found for this automation.</p>';
+                } else {
+                    let html = '<table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">';
+                    html += '<tr style="background: #f8f9fa; border-bottom: 1px solid #ddd; text-align: left;"><th style="padding: 8px;">Date</th><th style="padding: 8px;">Status</th><th style="padding: 8px;">Message</th></tr>';
+                    
+                    data.logs.forEach(log => {
+                        const date = new Date(log.created_at).toLocaleString();
+                        const statusColor = log.status === 'success' ? '#27ae60' : (log.status === 'failure' ? '#c0392b' : '#f39c12');
+                        html += `<tr style="border-bottom: 1px solid #eee;">
+                            <td style="padding: 8px; white-space: nowrap;">${date}</td>
+                            <td style="padding: 8px;"><span style="color: white; background: ${statusColor}; padding: 2px 6px; border-radius: 3px; font-size: 0.7rem; font-weight: bold; text-transform: uppercase;">${log.status}</span></td>
+                            <td style="padding: 8px;">
+                                <div>${log.message}</div>
+                                ${log.details && log.details.error ? `<div style="font-size: 0.75rem; color: #c0392b; margin-top: 4px; font-family: monospace; background: #fff5f5; padding: 5px; border-radius: 3px; border: 1px solid #fed7d7;">${log.details.error}</div>` : ''}
+                            </td>
+                        </tr>`;
+                    });
+                    html += '</table>';
+                    content.innerHTML = html;
+                }
+            } else {
+                content.innerHTML = '<p style="color: #c0392b;">Failed to load logs.</p>';
+            }
+        } catch (error) {
+            content.innerHTML = '<p style="color: #c0392b;">Error fetching logs.</p>';
+        }
+    }
+
+    function closeLogsModal() {
+        document.getElementById('logs-modal').style.display = 'none';
     }
 
     function closeModal() {

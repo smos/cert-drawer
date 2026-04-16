@@ -97,7 +97,8 @@ class CertHealthController extends Controller
             }
         }
 
-        return view('cert_health.index', compact('domains'));
+        return view('cert_health.index', compact('domains'))
+            ->with('containerClass', 'container-fluid');
     }
 
     public function runCheck(CertHealthService $certService)

@@ -88,6 +88,7 @@ Route::middleware('auth')->group(function () {
         Route::post('/automations/test', [\App\Http\Controllers\AutomationController::class, 'testConnection'])->name('automations.test');
         Route::post('/automations/check-cert', [\App\Http\Controllers\AutomationController::class, 'checkCertificate'])->name('automations.check-cert');
         Route::post('/automations/{automation}/run', [\App\Http\Controllers\AutomationController::class, 'run'])->name('automations.run');
+        Route::post('/automations/{automation}/test', [\App\Http\Controllers\AutomationController::class, 'test'])->name('automations.test-run');
         Route::delete('/automations/{automation}', [\App\Http\Controllers\AutomationController::class, 'destroy'])->name('automations.destroy');
     });
 });

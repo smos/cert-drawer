@@ -20,6 +20,11 @@ class Automation extends Model
         return $this->belongsTo(Domain::class);
     }
 
+    public function logs()
+    {
+        return $this->hasMany(AutomationLog::class);
+    }
+
     public function setPasswordAttribute($value)
     {
         if ($value) {

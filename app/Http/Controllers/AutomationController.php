@@ -16,7 +16,8 @@ class AutomationController extends Controller
     {
         $automations = Automation::with('domain')->latest()->get();
         $domains = Domain::orderBy('name')->get();
-        return view('automations.index', compact('automations', 'domains'));
+        return view('automations.index', compact('automations', 'domains'))
+            ->with('containerClass', 'container-fluid');
     }
 
     public function testConnection(Request $request)
@@ -85,8 +86,16 @@ class AutomationController extends Controller
             'domain_id' => 'required|exists:domains,id',
             'type' => 'required|in:kemp,fortigate,paloalto',
             'hostname' => 'required|string',
-            'password' => 'required|string',
+            'password' => 'nullable|string',
         ]);
+
+        if (empty($validated['password'])) {
+            return response()->json([
+                'success' => true,
+                'exists' => 'unknown',
+                'message' => 'Skipping device check (no API key provided). Existing certificate will be replaced if it exists when running.'
+            ]);
+        }
 
         $domain = Domain::findOrFail($validated['domain_id']);
         $certName = "auto_" . str_replace(['*', '.'], ['wildcard', '_'], $domain->name);
@@ -205,6 +214,12 @@ class AutomationController extends Controller
         ]);
 
         $automation = Automation::create($validated);
+        
+        $automation->logs()->create([
+            'status' => 'success',
+            'message' => 'Automation created',
+        ]);
+
         AuditLog::log('automation_create', "Created {$automation->type} automation for: {$automation->domain->name}");
 
         return redirect()->route('automations.index')->with('success', 'Automation created successfully.');
@@ -221,7 +236,8 @@ class AutomationController extends Controller
                 'hostname' => $automation->hostname,
                 'config' => $automation->config,
                 // We don't send the password back for security, even encrypted
-            ]
+            ],
+            'logs' => $automation->logs()->latest()->limit(10)->get()
         ]);
     }
 
@@ -240,6 +256,12 @@ class AutomationController extends Controller
         }
 
         $automation->update($validated);
+
+        $automation->logs()->create([
+            'status' => 'success',
+            'message' => 'Automation settings updated',
+        ]);
+
         AuditLog::log('automation_update', "Updated {$automation->type} automation for: {$automation->domain->name}");
 
         return redirect()->route('automations.index')->with('success', 'Automation updated successfully.');
@@ -255,17 +277,87 @@ class AutomationController extends Controller
 
         try {
             if ($automation->type === 'kemp') {
-                app(KempService::class)->deploy($automation, $latestCert);
+                app(\App\Services\KempService::class)->deploy($automation, $latestCert);
             } elseif ($automation->type === 'fortigate') {
-                app(FortigateService::class)->deploy($automation, $latestCert);
+                app(\App\Services\FortigateService::class)->deploy($automation, $latestCert);
             } elseif ($automation->type === 'paloalto') {
-                app(PaloAltoService::class)->deploy($automation, $latestCert);
+                app(\App\Services\PaloAltoService::class)->deploy($automation, $latestCert);
             }
+
+            $automation->logs()->create([
+                'status' => 'success',
+                'message' => 'Manual deployment successful',
+            ]);
 
             AuditLog::log('automation_run', "Manually triggered {$automation->type} deployment for: {$automation->domain->name}");
             return back()->with('success', 'Deployment successful.');
         } catch (\Exception $e) {
-            return back()->withErrors(['error' => 'Deployment failed: ' . $e->getMessage()]);
+            $errorMessage = $e->getMessage();
+            
+            $automation->logs()->create([
+                'status' => 'failure',
+                'message' => 'Manual deployment failed',
+                'details' => ['error' => $errorMessage, 'trace' => $e->getTraceAsString()]
+            ]);
+
+            // Send Email
+            $recipientsString = \App\Models\Setting::where('key', 'automation_mail_recipients')->value('value') ?? '';
+            $recipients = array_filter(array_map('trim', explode(',', $recipientsString)));
+            
+            if (!empty($recipients)) {
+                try {
+                    \Illuminate\Support\Facades\Mail::to($recipients)->send(new \App\Mail\AutomationFailed($automation, $latestCert, $errorMessage));
+                } catch (\Exception $me) {
+                    \Illuminate\Support\Facades\Log::error("Failed to send automation error email: " . $me->getMessage());
+                }
+            }
+
+            return back()->withErrors(['error' => 'Deployment failed: ' . $errorMessage]);
+        }
+    }
+
+    public function test(Automation $automation)
+    {
+        $latestCert = $automation->domain->certificates()->where('status', 'issued')->latest()->first();
+        
+        if (!$latestCert) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No issued certificate found for this domain.'
+            ], 400);
+        }
+
+        try {
+            $status = [];
+            if ($automation->type === 'kemp') {
+                $status = app(\App\Services\KempService::class)->checkStatus($automation, $latestCert);
+            } elseif ($automation->type === 'fortigate') {
+                $status = app(\App\Services\FortigateService::class)->checkStatus($automation, $latestCert);
+            } elseif ($automation->type === 'paloalto') {
+                $status = app(\App\Services\PaloAltoService::class)->checkStatus($automation, $latestCert);
+            }
+
+            $automation->logs()->create([
+                'status' => 'success',
+                'message' => 'Dry-run check (test) completed successfully',
+                'details' => $status
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'status' => $status
+            ]);
+        } catch (\Exception $e) {
+            $automation->logs()->create([
+                'status' => 'failure',
+                'message' => 'Dry-run check (test) failed',
+                'details' => ['error' => $e->getMessage()]
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Check failed: ' . $e->getMessage()
+            ], 400);
         }
     }
 

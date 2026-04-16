@@ -79,17 +79,38 @@ class PaloAltoService
 
         Log::info("Successfully imported keypair {$certName} on Palo Alto at {$host}");
 
+        $errors = [];
+
         // 1. Update SSL/TLS Service Profiles
-        $this->updateProfileReferences($automation, $certName);
+        try {
+            $this->updateProfileReferences($automation, $certName);
+        } catch (Exception $e) {
+            $errors[] = "Profiles: " . $e->getMessage();
+        }
 
         // 2. Update Decryption Rules
-        $this->updateDecryptionRules($automation, $certName, $certificate->domain->name);
+        try {
+            $this->updateDecryptionRules($automation, $certName, $certificate->domain->name);
+        } catch (Exception $e) {
+            $errors[] = "Decryption Rules: " . $e->getMessage();
+        }
 
         // 3. Cleanup old/expired certificates for this domain
-        $this->cleanupExpiredCerts($automation, $certificate->domain->name);
+        try {
+            $this->cleanupExpiredCerts($automation, $certificate->domain->name);
+        } catch (Exception $e) {
+            // Cleanup failure is a warning, not a critical error
+            Log::warning("Palo Alto Cleanup failed: " . $e->getMessage());
+        }
 
         // 4. Final Commit
-        $this->commit($automation);
+        if (!$this->commit($automation)) {
+            $errors[] = "Commit failed";
+        }
+
+        if (!empty($errors)) {
+            throw new Exception("Certificate imported, but failed to apply some changes: " . implode('; ', $errors));
+        }
 
         return true;
     }
@@ -110,6 +131,12 @@ class PaloAltoService
 
         if (!$response->successful()) {
             Log::error("Palo Alto Commit Failed: " . $response->body());
+            return false;
+        }
+
+        $xml = simplexml_load_string($response->body());
+        if (!$xml || (string)$xml['status'] !== 'success') {
+            Log::error("Palo Alto Commit API Error: " . $response->body());
             return false;
         }
 
@@ -134,6 +161,7 @@ class PaloAltoService
 
         $host = $automation->hostname;
         $key = $automation->getDecryptedPassword();
+        $errors = [];
 
         foreach ($profiles as $profileName) {
             if (empty($profileName)) continue;
@@ -147,10 +175,19 @@ class PaloAltoService
                 ->post($url);
 
             if (!$response->successful()) {
-                Log::error("Failed to update Palo Alto Profile {$profileName}: " . $response->body());
+                $errors[] = "{$profileName} (HTTP {$response->status()})";
             } else {
-                Log::info("Successfully updated Palo Alto Profile {$profileName} to use {$certName}");
+                $xml = simplexml_load_string($response->body());
+                if (!$xml || (string)$xml['status'] !== 'success') {
+                    $errors[] = "{$profileName} (" . ($xml ? (string)$xml->msg : "XML Error") . ")";
+                } else {
+                    Log::info("Successfully updated Palo Alto Profile {$profileName} to use {$certName}");
+                }
             }
+        }
+
+        if (!empty($errors)) {
+            throw new Exception("Failed to update profiles: " . implode(', ', $errors));
         }
     }
 
@@ -167,7 +204,6 @@ class PaloAltoService
         $oldCertPrefix = "auto_{$safeName}_";
 
         // Fetch all decryption rules
-        // Path might vary based on vsys, trying vsys1 as default
         $xpath = "/config/devices/entry[@name='localhost.localdomain']/vsys/entry[@name='vsys1']/rulebase/decryption/rules";
         $url = "https://{$host}/api/?type=config&action=get&xpath=" . urlencode($xpath);
 
@@ -176,34 +212,72 @@ class PaloAltoService
             ->get($url);
 
         if (!$response->successful()) {
-            Log::error("Failed to fetch Palo Alto Decryption Rules: " . $response->body());
-            return;
+            throw new Exception("Failed to fetch decryption rules (HTTP {$response->status()})");
         }
 
         $xml = simplexml_load_string($response->body());
-        if (!$xml || (string)$xml['status'] !== 'success' || !isset($xml->result->rules->entry)) {
+        if (!$xml || (string)$xml['status'] !== 'success') {
+            throw new Exception("Failed to fetch decryption rules: " . ($xml ? (string)$xml->msg : "XML Error"));
+        }
+
+        if (!isset($xml->result->rules->entry)) {
             return;
         }
 
+        $errors = [];
+
         foreach ($xml->result->rules->entry as $rule) {
             $ruleName = (string)$rule['name'];
-            $currentCert = (string)$rule->{'ssl-forward-proxy'}->certificate;
+            $currentCert = null;
+            $certPathSuffix = '';
+
+            // Handle SSL Forward Proxy
+            if (isset($rule->type->{'ssl-forward-proxy'}->certificate)) {
+                $currentCert = (string)$rule->type->{'ssl-forward-proxy'}->certificate;
+                $certPathSuffix = "/type/ssl-forward-proxy/certificate";
+            } 
+            // Handle SSL Inbound Inspection
+            elseif (isset($rule->type->{'ssl-inbound-inspection'}->certificates->member)) {
+                // Inbound inspection can have multiple members, we check if any match our pattern
+                foreach ($rule->type->{'ssl-inbound-inspection'}->certificates->member as $member) {
+                    $mName = (string)$member;
+                    if (str_starts_with($mName, $oldCertPrefix)) {
+                         $currentCert = $mName;
+                         $certPathSuffix = "/type/ssl-inbound-inspection/certificates/member[.='{$mName}']";
+                         break; 
+                    }
+                }
+            }
             
             // If the rule uses a certificate that matches our auto-managed pattern for this domain
-            if (str_starts_with($currentCert, $oldCertPrefix) && $currentCert !== $newCertName) {
+            if ($currentCert && str_starts_with($currentCert, $oldCertPrefix) && $currentCert !== $newCertName) {
                 Log::info("Updating Palo Alto Decryption Rule '{$ruleName}' to use '{$newCertName}' (was '{$currentCert}')");
                 
-                $setPath = "{$xpath}/entry[@name='{$ruleName}']/ssl-forward-proxy/certificate";
-                $setUrl = "https://{$host}/api/?type=config&action=set&xpath=" . urlencode($setPath) . "&element=" . urlencode("<certificate>{$newCertName}</certificate>");
+                $setPath = "{$xpath}/entry[@name='{$ruleName}']{$certPathSuffix}";
+                $setUrl = "https://{$host}/api/?type=config&action=set&xpath=" . urlencode($setPath) . "&element=" . urlencode("<member>{$newCertName}</member>");
+                
+                // If it was a single certificate field (forward proxy) instead of a member list
+                if (str_contains($certPathSuffix, 'ssl-forward-proxy')) {
+                    $setUrl = "https://{$host}/api/?type=config&action=set&xpath=" . urlencode($setPath) . "&element=" . urlencode("<certificate>{$newCertName}</certificate>");
+                }
 
                 $setResponse = Http::withoutVerifying()
                     ->withHeaders(['X-PAN-KEY' => $key])
                     ->post($setUrl);
 
                 if (!$setResponse->successful()) {
-                    Log::error("Failed to update Palo Alto Decryption Rule '{$ruleName}': " . $setResponse->body());
+                    $errors[] = "Rule '{$ruleName}'";
+                } else {
+                    $setXml = simplexml_load_string($setResponse->body());
+                    if (!$setXml || (string)$setXml['status'] !== 'success') {
+                        $errors[] = "Rule '{$ruleName}' (" . ($setXml ? (string)$setXml->msg : "XML Error") . ")";
+                    }
                 }
             }
+        }
+
+        if (!empty($errors)) {
+            throw new Exception("Failed to update decryption rules: " . implode(', ', $errors));
         }
     }
 
@@ -258,6 +332,125 @@ class PaloAltoService
         }
 
         return $deleted;
+    }
+
+    /**
+     * Check the status of the automation on the device.
+     */
+    public function checkStatus(Automation $automation, Certificate $certificate)
+    {
+        $host = $automation->hostname;
+        $key = $automation->getDecryptedPassword();
+        
+        $safeName = str_replace(['*', '.'], ['wildcard', '_'], $certificate->domain->name);
+        $certName = "auto_{$safeName}_{$certificate->id}";
+
+        $certs = $this->listCerts($automation);
+        $existing = null;
+        foreach ($certs as $c) {
+            if ($c['name'] === $certName) {
+                $existing = $c;
+                break;
+            }
+        }
+
+        $status = [
+            'cert_name' => $certName,
+            'exists_on_device' => !is_null($existing),
+            'needs_update' => is_null($existing),
+            'message' => $existing ? "Exact certificate version '{$certName}' found on Palo Alto." : "Certificate '{$certName}' not found on Palo Alto.",
+            'details' => [
+                'profiles' => [],
+                'decryption_rules' => []
+            ]
+        ];
+
+        if ($existing) {
+            $deviceCert = $this->getCert($automation, $certName);
+            $status['details']['device_cert'] = [
+                'name' => $existing['name'],
+                'serial' => $deviceCert['serial'] ?? 'unknown',
+                'thumbprint' => $deviceCert['thumbprint'] ?? 'unknown',
+                'expiry' => $deviceCert['expiry'] ?? 'unknown',
+            ];
+            $status['details']['local_cert'] = [
+                'serial' => $certificate->serial_number,
+                'thumbprint' => $certificate->thumbprint_sha256,
+                'expiry' => $certificate->expiry_date,
+            ];
+            
+            if (isset($deviceCert['serial']) && $certificate->serial_number) {
+                 $devSerial = strtolower(str_replace(' ', '', (string)$deviceCert['serial']));
+                 $locSerial = strtolower(str_replace(' ', '', (string)$certificate->serial_number));
+                 if ($devSerial !== $locSerial) {
+                     $status['needs_update'] = true;
+                     $status['message'] = "Certificate '{$certName}' version mismatch (Serial: {$deviceCert['serial']} vs {$certificate->serial_number}).";
+                 }
+            }
+        }
+
+        // Check Profiles
+        $profilesString = $automation->config['profiles_string'] ?? '';
+        if (!empty($profilesString)) {
+            $profiles = array_filter(array_map('trim', explode(',', $profilesString)));
+            foreach ($profiles as $p) {
+                $xpath = "/config/shared/ssl-tls-service-profile/entry[@name='{$p}']/certificate";
+                $url = "https://{$host}/api/?type=config&action=get&xpath=" . urlencode($xpath);
+                $resp = Http::withoutVerifying()->withHeaders(['X-PAN-KEY' => $key])->get($url);
+                $current = 'unknown';
+                if ($resp->successful()) {
+                    $xml = simplexml_load_string($resp->body());
+                    if ($xml && (string)$xml['status'] === 'success') {
+                        // The certificate element is inside result -> ssl-tls-service-profile -> entry
+                        if (isset($xml->result->{'ssl-tls-service-profile'}->entry->certificate)) {
+                            $current = (string)$xml->result->{'ssl-tls-service-profile'}->entry->certificate;
+                        } elseif (isset($xml->result->entry->certificate)) {
+                            $current = (string)$xml->result->entry->certificate;
+                        }
+                    }
+                }
+                $status['details']['profiles'][$p] = [
+                    'current_value' => $current,
+                    'up_to_date' => $current === $certName
+                ];
+            }
+        }
+
+        // Check Decryption Rules
+        $oldCertPrefix = "auto_{$safeName}_";
+        $xpath = "/config/devices/entry[@name='localhost.localdomain']/vsys/entry[@name='vsys1']/rulebase/decryption/rules";
+        $url = "https://{$host}/api/?type=config&action=get&xpath=" . urlencode($xpath);
+        $resp = Http::withoutVerifying()->withHeaders(['X-PAN-KEY' => $key])->get($url);
+        if ($resp->successful()) {
+            $xml = simplexml_load_string($resp->body());
+            if ($xml && (string)$xml['status'] === 'success' && isset($xml->result->rules->entry)) {
+                foreach ($xml->result->rules->entry as $rule) {
+                    $ruleName = (string)$rule['name'];
+                    $currentCert = null;
+
+                    if (isset($rule->type->{'ssl-forward-proxy'}->certificate)) {
+                        $currentCert = (string)$rule->type->{'ssl-forward-proxy'}->certificate;
+                    } elseif (isset($rule->type->{'ssl-inbound-inspection'}->certificates->member)) {
+                        foreach ($rule->type->{'ssl-inbound-inspection'}->certificates->member as $member) {
+                            $mName = (string)$member;
+                            if (str_starts_with($mName, $oldCertPrefix)) {
+                                $currentCert = $mName;
+                                break;
+                            }
+                        }
+                    }
+
+                    if ($currentCert && str_starts_with($currentCert, $oldCertPrefix)) {
+                        $status['details']['decryption_rules'][$ruleName] = [
+                            'current_value' => $currentCert,
+                            'up_to_date' => $currentCert === $certName
+                        ];
+                    }
+                }
+            }
+        }
+
+        return $status;
     }
 
     /**
@@ -322,6 +515,32 @@ class PaloAltoService
             return null;
         }
 
-        return (array)$xml->result->entry;
+        $entry = $xml->result->entry;
+        $pem = (string)$entry->{'public-key'};
+        
+        $expiry = (string)$entry->{'not-valid-after'};
+        
+        $data = [
+            'name' => (string)$entry['name'],
+            'common_name' => (string)$entry->common_name,
+            'expiry' => $expiry ?: 'unknown',
+            'serial' => 'unknown',
+            'thumbprint' => 'unknown',
+        ];
+
+        if (!empty($pem)) {
+            $certService = app(CertificateService::class);
+            $pem = $certService->ensurePem($pem);
+            $info = $certService->getCertInfo($pem);
+            if ($info) {
+                $data['serial'] = $info['serialNumber'] ?? $data['serial'];
+                $data['thumbprint'] = $certService->extractThumbprint($pem, 'sha256');
+                if (isset($info['validTo_time_t'])) {
+                    $data['expiry'] = date('Y-m-d H:i:s', $info['validTo_time_t']);
+                }
+            }
+        }
+
+        return $data;
     }
 }

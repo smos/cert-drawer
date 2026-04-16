@@ -3,7 +3,7 @@
 @section('content')
 <h2>Audit Logs</h2>
 
-<div style="background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); overflow: hidden;">
+<div class="table-responsive" style="background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); overflow: hidden;">
     <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
         <thead>
             <tr style="background: #f8f9fa; border-bottom: 2px solid #eee; text-align: left;">

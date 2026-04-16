@@ -82,10 +82,34 @@ class RenewAcmeCertificates extends Command
                         } elseif ($automation->type === 'paloalto') {
                             app(PaloAltoService::class)->deploy($automation, $newCert);
                         }
+                        
+                        $automation->logs()->create([
+                            'status' => 'success',
+                            'message' => 'Auto-renewal deployment successful',
+                        ]);
+
                         AuditLog::log('automation_auto_run_success', "Auto-triggered {$automation->type} deployment for: {$automation->domain->name}");
                     } catch (Exception $ae) {
                         $this->error("  Automation failed: " . $ae->getMessage());
+                        
+                        $automation->logs()->create([
+                            'status' => 'failure',
+                            'message' => 'Auto-renewal deployment failed',
+                            'details' => ['error' => $ae->getMessage()]
+                        ]);
+
                         AuditLog::log('automation_auto_run_failed', "Auto-triggered {$automation->type} deployment FAILED for: {$automation->domain->name}. Error: " . $ae->getMessage());
+
+                        // Send Automation Failure Email
+                        $autoRecipientsString = Setting::where('key', 'automation_mail_recipients')->value('value') ?? '';
+                        $autoRecipients = array_filter(array_map('trim', explode(',', $autoRecipientsString)));
+                        if (!empty($autoRecipients)) {
+                            try {
+                                Mail::to($autoRecipients)->send(new \App\Mail\AutomationFailed($automation, $newCert, $ae->getMessage()));
+                            } catch (Exception $me) {
+                                $this->error("  Failed to send automation email: " . $me->getMessage());
+                            }
+                        }
                     }
                 }
 

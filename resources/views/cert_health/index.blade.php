@@ -15,21 +15,21 @@
     </form>
 </div>
 
-<div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-    <table style="width: 100%; border-collapse: collapse;">
+<div class="table-responsive" style="background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); overflow: hidden;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
         <thead>
-            <tr style="border-bottom: 2px solid #eee; text-align: left;">
-                <th style="padding: 10px;">Domain</th>
-                <th style="padding: 10px;">Status</th>
-                <th style="padding: 10px;">Resolved IP Checks</th>
-                <th style="padding: 10px;">Last Check</th>
+            <tr style="background: #f8f9fa; border-bottom: 2px solid #eee; text-align: left;">
+                <th style="padding: 12px 15px;">Domain</th>
+                <th style="padding: 12px 15px;">Status</th>
+                <th style="padding: 12px 15px;">Resolved IP Checks</th>
+                <th style="padding: 12px 15px; text-align: right;">Last Check</th>
             </tr>
         </thead>
         <tbody>
             @foreach($domains as $domain)
                 <tr style="border-bottom: 1px solid #eee;">
-                    <td style="padding: 10px; font-weight: 600;">
-                        {{ $domain->name }}
+                    <td style="padding: 12px 15px; font-weight: 600; vertical-align: top;">
+                        <strong style="cursor:pointer; color: #3498db;" onclick="openDrawer({{ $domain->id }})">{{ $domain->name }}</strong>
                         @if($domain->mismatch)
                             <div style="color: #e67e22; font-size: 0.75rem; margin-top: 5px;">
                                 ⚠️ <strong>Mismatch:</strong> Multiple certificates found within the same check type!
@@ -46,7 +46,7 @@
                             </div>
                         @endif
                     </td>
-                    <td style="padding: 10px;">
+                    <td style="padding: 12px 15px; vertical-align: top;">
                         @switch($domain->health_status)
                             @case('expired')
                                 <span class="tag" style="background: #e74c3c; color: white;">Expired</span>
@@ -67,7 +67,7 @@
                                 <span class="tag" style="background: #95a5a6; color: white;">No Data</span>
                         @endswitch
                     </td>
-                    <td style="padding: 10px;">
+                    <td style="padding: 12px 15px;">
                         <div style="display: flex; flex-direction: column; gap: 10px;">
                             @foreach(['internal' => 'Internal (Local/Poller)', 'external' => 'External (Resolver)'] as $type => $label)
                                 @if(isset($domain->health_logs[$type]))
@@ -125,9 +125,9 @@
                             @endif
                         </div>
                     </td>
-                    <td style="padding: 10px; color: #666; font-size: 0.85rem;">
-                        <div>{{ $domain->last_cert_check ? $domain->last_cert_check->diffForHumans() : 'Never' }}</div>
-                        <div style="margin-top: 10px; display: flex; gap: 5px;">
+                    <td style="padding: 12px 15px; color: #666; font-size: 0.85rem; text-align: right; vertical-align: top;">
+                        <div style="margin-bottom: 5px;">{{ $domain->last_cert_check ? $domain->last_cert_check->diffForHumans() : 'Never' }}</div>
+                        <div style="display: flex; gap: 5px; justify-content: flex-end;">
                             <form action="{{ route('cert-health.check-domain', $domain) }}" method="POST">
                                 @csrf
                                 <button type="submit" class="btn btn-sm" style="padding: 2px 8px; font-size: 0.7rem;">Check Now</button>

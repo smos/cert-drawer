@@ -88,6 +88,58 @@ class KempService
     }
 
     /**
+     * Check the status of the automation on the device.
+     */
+    public function checkStatus(Automation $automation, Certificate $certificate)
+    {
+        $certName = "auto_" . str_replace(['*', '.'], ['wildcard', '_'], $certificate->domain->name);
+        $existing = $this->getCert($automation, $certName);
+
+        $status = [
+            'cert_name' => $certName,
+            'exists_on_device' => !is_null($existing),
+            'needs_update' => true,
+            'message' => '',
+            'details' => []
+        ];
+
+        if ($existing) {
+            $certService = app(CertificateService::class);
+            $existingInfo = $certService->getCertInfo($existing);
+            $localInfo = $certService->getCertInfo($certificate->certificate);
+
+            $existingSerial = $existingInfo['serialNumber'] ?? 'unknown';
+            $localSerial = $localInfo['serialNumber'] ?? 'unknown';
+            $existingThumb = $certService->extractThumbprint($existing, 'sha256');
+            $localThumb = $certificate->thumbprint_sha256;
+
+            $status['details']['device_cert'] = [
+                'serial' => $existingSerial,
+                'thumbprint' => $existingThumb,
+                'expiry' => isset($existingInfo['validTo_time_t']) ? date('Y-m-d H:i:s', $existingInfo['validTo_time_t']) : 'unknown',
+            ];
+            
+            $status['details']['local_cert'] = [
+                'serial' => $localSerial,
+                'thumbprint' => $localThumb,
+                'expiry' => $certificate->expiry_date,
+            ];
+
+            if ($existingThumb === $localThumb) {
+                $status['needs_update'] = false;
+                $status['message'] = "Certificate '{$certName}' is up to date on device.";
+            } else {
+                $status['needs_update'] = true;
+                $status['message'] = "Certificate '{$certName}' on device differs from local version (Serial: {$existingSerial} vs {$localSerial}).";
+            }
+        } else {
+            $status['message'] = "Certificate '{$certName}' not found on device.";
+        }
+
+        return $status;
+    }
+
+    /**
      * Get a specific certificate from the Kemp device.
      */
     public function getCert(Automation $automation, string $certName)

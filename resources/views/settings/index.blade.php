@@ -181,6 +181,10 @@
         <label>Cert Health Recipients (Comma-separated)</label><br>
         <input type="text" name="cert_mail_recipients" value="{{ $settings['cert_mail_recipients'] ?? '' }}" placeholder="admin@example.com, it@example.com" style="width:100%; padding:8px; border:1px solid #ddd;">
     </div>
+    <div style="margin-bottom:15px">
+        <label>Automation Recipients (Comma-separated)</label><br>
+        <input type="text" name="automation_mail_recipients" value="{{ $settings['automation_mail_recipients'] ?? '' }}" placeholder="admin@example.com, it@example.com" style="width:100%; padding:8px; border:1px solid #ddd;">
+    </div>
 
     <hr>
     <h3>Test SMTP Settings</h3>

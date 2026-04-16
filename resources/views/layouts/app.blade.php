@@ -69,6 +69,17 @@
             margin: 0 auto;
         }
 
+        .container-fluid {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        .table-responsive {
+            width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
         .domain-list {
             list-style: none;
             padding: 0;
@@ -208,7 +219,7 @@
     </nav>
 
     <main>
-        <div class="container">
+        <div class="{{ $containerClass ?? 'container' }}">
             @yield('content')
         </div>
     </main>
