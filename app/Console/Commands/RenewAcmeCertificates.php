@@ -11,6 +11,7 @@ use App\Services\KempService;
 use App\Services\FortigateService;
 use App\Services\PaloAltoService;
 use App\Mail\AcmeRenewalFailed;
+use App\Mail\AcmeRenewalSuccess;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -28,11 +29,14 @@ class RenewAcmeCertificates extends Command
         $recipientsString = Setting::where('key', 'cert_mail_recipients')->value('value') ?? '';
         $recipients = array_filter(array_map('trim', explode(',', $recipientsString)));
 
-        // Get issued ACME certificates that are not archived and expiring soon
+        // Get issued ACME certificates that are not archived and expiring soon, only for enabled domains
         $expiringCerts = Certificate::where('request_type', 'acme')
             ->where('status', 'issued')
             ->whereNull('archived_at')
             ->where('expiry_date', '<', now()->addDays($thresholdDays))
+            ->whereHas('domain', function($query) {
+                $query->where('is_enabled', true);
+            })
             ->get();
 
         if ($expiringCerts->isEmpty()) {
@@ -70,6 +74,15 @@ class RenewAcmeCertificates extends Command
                 $this->info("  Successfully renewed certificate for {$cert->domain->name}");
                 AuditLog::log('acme_auto_renewal_success', "Successfully auto-renewed certificate for domain: {$cert->domain->name}");
 
+                // Send success email
+                if (!empty($recipients)) {
+                    try {
+                        Mail::to($recipients)->send(new AcmeRenewalSuccess($newCert));
+                    } catch (Exception $me) {
+                        $this->error("  Failed to send success email alert: " . $me->getMessage());
+                    }
+                }
+
                 // 4. Trigger Automations
                 $automations = $cert->domain->automations;
                 foreach ($automations as $automation) {
@@ -83,9 +96,16 @@ class RenewAcmeCertificates extends Command
                             app(PaloAltoService::class)->deploy($automation, $newCert);
                         }
                         
+                        $warnings = session('automation_warnings', []);
+                        $msg = 'Auto-renewal deployment successful';
+                        if (!empty($warnings)) {
+                            $msg .= ' (with warnings: ' . implode('; ', $warnings) . ')';
+                        }
+
                         $automation->logs()->create([
                             'status' => 'success',
-                            'message' => 'Auto-renewal deployment successful',
+                            'message' => $msg,
+                            'details' => !empty($warnings) ? ['warnings' => $warnings] : null
                         ]);
 
                         AuditLog::log('automation_auto_run_success', "Auto-triggered {$automation->type} deployment for: {$automation->domain->name}");

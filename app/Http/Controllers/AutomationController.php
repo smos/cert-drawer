@@ -284,9 +284,16 @@ class AutomationController extends Controller
                 app(\App\Services\PaloAltoService::class)->deploy($automation, $latestCert);
             }
 
+            $warnings = session('automation_warnings', []);
+            $message = 'Manual deployment successful';
+            if (!empty($warnings)) {
+                $message .= ' (with warnings: ' . implode('; ', $warnings) . ')';
+            }
+
             $automation->logs()->create([
                 'status' => 'success',
-                'message' => 'Manual deployment successful',
+                'message' => $message,
+                'details' => !empty($warnings) ? ['warnings' => $warnings] : null
             ]);
 
             AuditLog::log('automation_run', "Manually triggered {$automation->type} deployment for: {$automation->domain->name}");

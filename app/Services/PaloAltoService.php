@@ -104,8 +104,10 @@ class PaloAltoService
         }
 
         // 4. Final Commit
-        if (!$this->commit($automation)) {
-            $errors[] = "Commit failed";
+        try {
+            $this->commit($automation);
+        } catch (Exception $e) {
+            $errors[] = $e->getMessage();
         }
 
         if (!empty($errors)) {
@@ -123,24 +125,103 @@ class PaloAltoService
         $host = $automation->hostname;
         $key = $automation->getDecryptedPassword();
         
-        $url = "https://{$host}/api/?type=op&cmd=<commit></commit>";
+        $url = "https://{$host}/api/?type=commit&cmd=<commit></commit>";
 
         $response = Http::withoutVerifying()
             ->withHeaders(['X-PAN-KEY' => $key])
             ->post($url);
 
+        $errorCodes = [
+            '400' => 'Bad request',
+            '403' => 'Forbidden (Invalid API key or insufficient rights)',
+            '1'   => 'Unknown command',
+            '6'   => 'Bad Xpath',
+            '7'   => 'Object not present',
+            '8'   => 'Object not unique',
+            '10'  => 'Reference count not zero',
+            '12'  => 'Invalid object',
+            '13'  => 'Object not found',
+            '14'  => 'Operation not possible',
+            '15'  => 'Operation denied',
+            '16'  => 'Unauthorized',
+            '17'  => 'Invalid command',
+            '18'  => 'Malformed command',
+            '22'  => 'Session timed out',
+        ];
+
         if (!$response->successful()) {
+            $code = $response->status();
+            $msg = $errorCodes[$code] ?? "HTTP Error {$code}";
             Log::error("Palo Alto Commit Failed: " . $response->body());
-            return false;
+            throw new Exception("Palo Alto Commit Failed: {$msg}");
         }
 
         $xml = simplexml_load_string($response->body());
         if (!$xml || (string)$xml['status'] !== 'success') {
+            $code = (string)($xml['code'] ?? 'unknown');
+            $msg = (string)($xml->msg->line ?? $xml->msg ?? "Unknown error");
+            $mappedMsg = $errorCodes[$code] ?? $msg;
+            
             Log::error("Palo Alto Commit API Error: " . $response->body());
-            return false;
+            throw new Exception("Palo Alto Commit API Error [Code {$code}]: {$mappedMsg}");
         }
 
-        Log::info("Successfully triggered commit on Palo Alto at {$host}");
+        $jobId = (string)($xml->result->job ?? '');
+        if (!$jobId) {
+            Log::info("Successfully triggered commit on Palo Alto at {$host} (No Job ID)");
+            return true;
+        }
+
+        Log::info("Palo Alto Commit Job #{$jobId} enqueued. Polling for results...");
+
+        // Basic polling for results (up to 30s)
+        $attempts = 0;
+        while ($attempts < 6) { // 6 * 5s = 30s
+            sleep(5);
+            $attempts++;
+            
+            $statusUrl = "https://{$host}/api/?type=op&cmd=" . urlencode("<show><jobs><id>{$jobId}</id></jobs></show>");
+            $statusResp = Http::withoutVerifying()->withHeaders(['X-PAN-KEY' => $key])->get($statusUrl);
+            
+            if ($statusResp->successful()) {
+                $statusXml = simplexml_load_string($statusResp->body());
+                if ($statusXml && (string)$statusXml['status'] === 'success') {
+                    $job = $statusXml->result->job;
+                    $status = (string)$job->status; // ACT, FIN
+                    $result = (string)$job->result; // PEND, OK, FAIL
+                    
+                    if ($status === 'FIN') {
+                        $warnings = [];
+                        if (isset($job->warnings->line)) {
+                            foreach ($job->warnings->line as $line) {
+                                $warnings[] = (string)$line;
+                            }
+                        }
+
+                        if ($result === 'FAIL') {
+                            $details = [];
+                            if (isset($job->details->line)) {
+                                foreach ($job->details->line as $line) {
+                                    $details[] = (string)$line;
+                                }
+                            }
+                            throw new Exception("Palo Alto Commit Job #{$jobId} FAILED. " . implode('; ', $details) . " " . implode('; ', $warnings));
+                        }
+
+                        if (!empty($warnings)) {
+                            Log::warning("Palo Alto Commit Job #{$jobId} succeeded with warnings: " . implode('; ', $warnings));
+                            // We don't throw exception for warnings on success, but we log them.
+                            // To make them visible in Automation Log, we could append them to the status message.
+                            session()->flash('automation_warnings', $warnings);
+                        }
+                        
+                        return true;
+                    }
+                }
+            }
+        }
+
+        Log::info("Palo Alto Commit Job #{$jobId} is still running after 30s. Continuing...");
         return true;
     }
 
@@ -228,56 +309,70 @@ class PaloAltoService
 
         foreach ($xml->result->rules->entry as $rule) {
             $ruleName = (string)$rule['name'];
-            $currentCert = null;
-            $certPathSuffix = '';
+            $isManaged = false;
+            $isForwardProxy = false;
+            $existingMembers = [];
 
-            // Handle SSL Forward Proxy
+            // Handle SSL Forward Proxy (Usually 1 cert)
             if (isset($rule->type->{'ssl-forward-proxy'}->certificate)) {
+                $isForwardProxy = true;
                 $currentCert = (string)$rule->type->{'ssl-forward-proxy'}->certificate;
-                $certPathSuffix = "/type/ssl-forward-proxy/certificate";
+                if (str_starts_with($currentCert, $oldCertPrefix)) {
+                    $isManaged = true;
+                }
             } 
-            // Handle SSL Inbound Inspection
+            // Handle SSL Inbound Inspection (Can be multiple certs)
             elseif (isset($rule->type->{'ssl-inbound-inspection'}->certificates->member)) {
-                // Inbound inspection can have multiple members, we check if any match our pattern
                 foreach ($rule->type->{'ssl-inbound-inspection'}->certificates->member as $member) {
                     $mName = (string)$member;
+                    $existingMembers[] = $mName;
                     if (str_starts_with($mName, $oldCertPrefix)) {
-                         $currentCert = $mName;
-                         $certPathSuffix = "/type/ssl-inbound-inspection/certificates/member[.='{$mName}']";
-                         break; 
+                         $isManaged = true;
                     }
                 }
             }
             
-            // If the rule uses a certificate that matches our auto-managed pattern for this domain
-            if ($currentCert && str_starts_with($currentCert, $oldCertPrefix) && $currentCert !== $newCertName) {
-                Log::info("Updating Palo Alto Decryption Rule '{$ruleName}' to use '{$newCertName}' (was '{$currentCert}')");
-                
-                $setPath = "{$xpath}/entry[@name='{$ruleName}']{$certPathSuffix}";
-                $setUrl = "https://{$host}/api/?type=config&action=set&xpath=" . urlencode($setPath) . "&element=" . urlencode("<member>{$newCertName}</member>");
-                
-                // If it was a single certificate field (forward proxy) instead of a member list
-                if (str_contains($certPathSuffix, 'ssl-forward-proxy')) {
-                    $setUrl = "https://{$host}/api/?type=config&action=set&xpath=" . urlencode($setPath) . "&element=" . urlencode("<certificate>{$newCertName}</certificate>");
-                }
-
-                $setResponse = Http::withoutVerifying()
-                    ->withHeaders(['X-PAN-KEY' => $key])
-                    ->post($setUrl);
-
-                if (!$setResponse->successful()) {
-                    $errors[] = "Rule '{$ruleName}'";
+            // If the rule is managed by us for this domain
+            if ($isManaged) {
+                if ($isForwardProxy) {
+                    $currentCert = (string)$rule->type->{'ssl-forward-proxy'}->certificate;
+                    if ($currentCert !== $newCertName) {
+                        Log::info("Updating Palo Alto Forward Proxy Rule '{$ruleName}' to use '{$newCertName}' (was '{$currentCert}')");
+                        $setPath = "{$xpath}/entry[@name='{$ruleName}']/type/ssl-forward-proxy/certificate";
+                        $setUrl = "https://{$host}/api/?type=config&action=set&xpath=" . urlencode($setPath) . "&element=" . urlencode("<certificate>{$newCertName}</certificate>");
+                        $this->executeSet($setUrl, $key, $ruleName, $errors);
+                    }
                 } else {
-                    $setXml = simplexml_load_string($setResponse->body());
-                    if (!$setXml || (string)$setXml['status'] !== 'success') {
-                        $errors[] = "Rule '{$ruleName}' (" . ($setXml ? (string)$setXml->msg : "XML Error") . ")";
+                    // Inbound Inspection: Add the NEW certificate to the list if not already there
+                    if (!in_array($newCertName, $existingMembers)) {
+                        Log::info("Adding certificate '{$newCertName}' to Palo Alto Inbound Inspection Rule '{$ruleName}'");
+                        // We set on the parent 'certificates' element to add a new 'member'
+                        $setPath = "{$xpath}/entry[@name='{$ruleName}']/type/ssl-inbound-inspection/certificates";
+                        $setUrl = "https://{$host}/api/?type=config&action=set&xpath=" . urlencode($setPath) . "&element=" . urlencode("<member>{$newCertName}</member>");
+                        $this->executeSet($setUrl, $key, $ruleName, $errors);
                     }
                 }
             }
         }
 
         if (!empty($errors)) {
-            throw new Exception("Failed to update decryption rules: " . implode(', ', $errors));
+            throw new Exception("Certificate imported, but failed to update some rules: " . implode('; ', $errors));
+        }
+    }
+
+    /**
+     * Helper to execute a set command and capture errors.
+     */
+    protected function executeSet(string $url, string $key, string $ruleName, array &$errors)
+    {
+        $response = Http::withoutVerifying()->withHeaders(['X-PAN-KEY' => $key])->post($url);
+        if (!$response->successful()) {
+            $errors[] = "Rule '{$ruleName}' (HTTP {$response->status()})";
+        } else {
+            $xml = simplexml_load_string($response->body());
+            if (!$xml || (string)$xml['status'] !== 'success') {
+                $errors[] = "Rule '{$ruleName}' (" . ($xml ? (string)$xml->msg : "XML Error") . ")";
+            }
         }
     }
 
@@ -297,6 +392,11 @@ class PaloAltoService
 
         foreach ($certs as $cert) {
             $name = $cert['name'];
+            // Never cleanup the one we JUST imported in this session
+            if ($name === "auto_{$safeName}_" . $automation->domain->certificates()->where('status', 'issued')->latest()->first()?->id) {
+                continue;
+            }
+
             if (str_starts_with($name, $prefix)) {
                 // Extract the ID from the name auto_domain_ID
                 $parts = explode('_', $name);
@@ -304,8 +404,10 @@ class PaloAltoService
                 
                 $localCert = \App\Models\Certificate::find($id);
                 // If the certificate is not found in our DB OR is marked as expired/archived in our DB
-                // OR if the expiry on the device is in the past
-                $isExpiredOnDevice = isset($cert['expiry']) && strtotime($cert['expiry']) < time();
+                // OR if the expiry on the device is in the past (only if expiry is actually present)
+                $expiryTime = !empty($cert['expiry']) ? strtotime($cert['expiry']) : null;
+                $isExpiredOnDevice = $expiryTime && $expiryTime < time();
+                
                 $isOldInDb = !$localCert || $localCert->archived_at || ($localCert->expiry_date && $localCert->expiry_date->isPast());
 
                 if ($isExpiredOnDevice || $isOldInDb) {
@@ -426,24 +528,37 @@ class PaloAltoService
             if ($xml && (string)$xml['status'] === 'success' && isset($xml->result->rules->entry)) {
                 foreach ($xml->result->rules->entry as $rule) {
                     $ruleName = (string)$rule['name'];
-                    $currentCert = null;
+                    $isManaged = false;
+                    $isForwardProxy = false;
+                    $currentCertValue = 'none';
+                    $upToDate = false;
 
                     if (isset($rule->type->{'ssl-forward-proxy'}->certificate)) {
-                        $currentCert = (string)$rule->type->{'ssl-forward-proxy'}->certificate;
+                        $isForwardProxy = true;
+                        $currentCertValue = (string)$rule->type->{'ssl-forward-proxy'}->certificate;
+                        if (str_starts_with($currentCertValue, $oldCertPrefix)) {
+                            $isManaged = true;
+                            $upToDate = ($currentCertValue === $certName);
+                        }
                     } elseif (isset($rule->type->{'ssl-inbound-inspection'}->certificates->member)) {
+                        $members = [];
                         foreach ($rule->type->{'ssl-inbound-inspection'}->certificates->member as $member) {
                             $mName = (string)$member;
+                            $members[] = $mName;
                             if (str_starts_with($mName, $oldCertPrefix)) {
-                                $currentCert = $mName;
-                                break;
+                                $isManaged = true;
+                            }
+                            if ($mName === $certName) {
+                                $upToDate = true;
                             }
                         }
+                        $currentCertValue = implode(', ', $members);
                     }
 
-                    if ($currentCert && str_starts_with($currentCert, $oldCertPrefix)) {
+                    if ($isManaged) {
                         $status['details']['decryption_rules'][$ruleName] = [
-                            'current_value' => $currentCert,
-                            'up_to_date' => $currentCert === $certName
+                            'current_value' => $currentCertValue,
+                            'up_to_date' => $upToDate
                         ];
                     }
                 }
