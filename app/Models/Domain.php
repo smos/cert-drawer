@@ -23,6 +23,11 @@ class Domain extends Model
         return $this->hasMany(Certificate::class);
     }
 
+    public function automations(): HasMany
+    {
+        return $this->hasMany(Automation::class);
+    }
+
     public function tags(): HasMany
     {
         return $this->hasMany(Tag::class);

@@ -86,6 +86,11 @@ class RenewAcmeCertificates extends Command
                 // 4. Trigger Automations
                 $automations = $cert->domain->automations;
                 foreach ($automations as $automation) {
+                    if (!$automation->is_active) {
+                        $this->comment("  Skipping inactive automation: {$automation->type} for {$automation->hostname}");
+                        continue;
+                    }
+
                     $this->comment("  Triggering {$automation->type} automation for {$automation->hostname}...");
                     try {
                         if ($automation->type === 'kemp') {

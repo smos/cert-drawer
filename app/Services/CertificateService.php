@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use Exception;
+use App\Models\Certificate;
 use Illuminate\Support\Facades\Storage;
 
 class CertificateService
@@ -230,13 +231,26 @@ req_extensions     = req_ext
 prompt             = no
 
 [ req_distinguished_name ]
-C  = " . substr($sanitize($dn['countryName'] ?? 'NL'), 0, 2) . "
-ST = " . $sanitize($dn['stateOrProvinceName'] ?? '') . "
-L  = " . $sanitize($dn['localityName'] ?? '') . "
-O  = " . $sanitize($dn['organizationName'] ?? '') . "
-OU = " . $sanitize($dn['organizationalUnitName'] ?? '') . "
-CN = " . $sanitize($dn['commonName'] ?? 'localhost') . "
+";
 
+        if (!empty($dn['countryName'])) {
+            $config .= "C  = " . substr($sanitize($dn['countryName']), 0, 2) . "\n";
+        }
+        if (!empty($dn['stateOrProvinceName'])) {
+            $config .= "ST = " . $sanitize($dn['stateOrProvinceName']) . "\n";
+        }
+        if (!empty($dn['localityName'])) {
+            $config .= "L  = " . $sanitize($dn['localityName']) . "\n";
+        }
+        if (!empty($dn['organizationName'])) {
+            $config .= "O  = " . $sanitize($dn['organizationName']) . "\n";
+        }
+        if (!empty($dn['organizationalUnitName'])) {
+            $config .= "OU = " . $sanitize($dn['organizationalUnitName']) . "\n";
+        }
+        $config .= "CN = " . $sanitize($dn['commonName'] ?? 'localhost') . "\n";
+
+        $config .= "
 [ req_ext ]
 subjectAltName = @alt_names
 
