@@ -29,10 +29,15 @@ class RenewAcmeCertificates extends Command
         $recipientsString = Setting::where('key', 'cert_mail_recipients')->value('value') ?? '';
         $recipients = array_filter(array_map('trim', explode(',', $recipientsString)));
 
-        // Get issued ACME certificates that are not archived and expiring soon, only for enabled domains
-        $expiringCerts = Certificate::where('request_type', 'acme')
+        // Get the latest issued ACME certificate for each domain that is not archived
+        $latestCertIds = Certificate::where('request_type', 'acme')
             ->where('status', 'issued')
             ->whereNull('archived_at')
+            ->selectRaw('MAX(id) as id')
+            ->groupBy('domain_id');
+
+        // Filter those latest certificates by expiry date and ensure domain is enabled
+        $expiringCerts = Certificate::whereIn('id', $latestCertIds)
             ->where('expiry_date', '<', now()->addDays($thresholdDays))
             ->whereHas('domain', function($query) {
                 $query->where('is_enabled', true);
@@ -73,6 +78,9 @@ class RenewAcmeCertificates extends Command
 
                 $this->info("  Successfully renewed certificate for {$cert->domain->name}");
                 AuditLog::log('acme_auto_renewal_success', "Successfully auto-renewed certificate for domain: {$cert->domain->name}");
+
+                // Archive the old certificate since it's now superseded
+                $cert->update(['archived_at' => now()]);
 
                 // Send success email
                 if (!empty($recipients)) {
