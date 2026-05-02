@@ -570,6 +570,33 @@ subjectAltName = @alt_names
         }
     }
 
+    public function getChain(\App\Models\Certificate $cert, $includeRoot = true): array
+    {
+        $chain = [];
+        $curr = $cert;
+        $safety = 0;
+
+        while ($curr && $curr->issuer_certificate_id && $safety < 20) {
+            $safety++;
+            $issuer = \App\Models\Certificate::find($curr->issuer_certificate_id);
+            if (!$issuer || !$issuer->certificate) break;
+
+            $chain[] = $issuer->certificate;
+
+            // Stop if it's a self-signed root
+            $akid = $this->extractAuthorityKeyIdentifier($issuer->certificate);
+            $skid = $this->extractSubjectKeyIdentifier($issuer->certificate);
+            if ($akid && $skid && $akid === $skid) {
+                if (!$includeRoot) array_pop($chain);
+                break;
+            }
+
+            $curr = $issuer;
+        }
+
+        return $chain;
+    }
+
     public function findIssuer(\App\Models\Certificate $cert, $cas)
     {
         $akid = $this->extractAuthorityKeyIdentifier($cert->certificate);

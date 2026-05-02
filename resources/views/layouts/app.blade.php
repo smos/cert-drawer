@@ -546,6 +546,7 @@
                                     ` : ''}
                                     ${c.certificate ? `
                                         <a href="/certificates/${c.id}/download/cert" class="btn btn-sm">Download Cert</a>
+                                        <a href="/certificates/${c.id}/download/chain" class="btn btn-sm" style="background: #27ae60; color: white;">Download Chain</a>
                                         ${c.has_private_key ? `
                                             ${c.has_pfx_password ? 
                                                 `<button class="btn btn-sm" onclick="downloadPfx(${c.id})">Download PFX</button>

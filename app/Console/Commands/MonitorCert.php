@@ -81,15 +81,58 @@ class MonitorCert extends Command
         $this->info("Certificate monitoring completed.");
     }
 
-    protected function sendNotification($startTime)
+    protected function triggerWebhooks($changes, $expiryAlerts)
     {
-        $recipientsString = Setting::where('key', 'cert_mail_recipients')->value('value');
-        if (empty($recipientsString)) {
+        if (empty($changes) && empty($expiryAlerts)) {
             return;
         }
 
-        $recipients = array_filter(array_map('trim', explode(',', $recipientsString)));
-        if (empty($recipients)) {
+        $webhookUrl = Setting::where('key', 'alert_webhook_url')->value('value');
+        if (empty($webhookUrl)) {
+            return;
+        }
+
+        $secret = Setting::where('key', 'alert_webhook_secret')->value('value');
+        
+        $payload = [
+            'timestamp' => now()->toIso8601String(),
+            'event' => 'cert_health_alert',
+            'changes' => $changes,
+            'expiry_alerts' => $expiryAlerts,
+        ];
+
+        $jsonPayload = json_encode($payload);
+        
+        $headers = [
+            'Content-Type' => 'application/json',
+            'User-Agent' => 'CertDrawer-Monitor/1.0',
+        ];
+
+        if (!empty($secret)) {
+            $headers['X-Hub-Signature-256'] = 'sha256=' . hash_hmac('sha256', $jsonPayload, $secret);
+        }
+
+        try {
+            $response = \Illuminate\Support\Facades\Http::withHeaders($headers)
+                ->timeout(10)
+                ->post($webhookUrl, $payload);
+
+            if ($response->successful()) {
+                $this->info("Webhook sent successfully to {$webhookUrl}");
+            } else {
+                $this->error("Webhook failed with status {$response->status()} at {$webhookUrl}");
+            }
+        } catch (\Exception $e) {
+            $this->error("Webhook delivery failed: " . $e->getMessage());
+        }
+    }
+
+    protected function sendNotification($startTime)
+    {
+        $recipientsString = Setting::where('key', 'cert_mail_recipients')->value('value');
+        $webhookUrl = Setting::where('key', 'alert_webhook_url')->value('value');
+
+        if (empty($recipientsString) && empty($webhookUrl)) {
             return;
         }
 
@@ -195,6 +238,17 @@ class MonitorCert extends Command
         }
 
         if (empty($changes) && empty($expiryAlerts)) {
+            return;
+        }
+
+        $this->triggerWebhooks($changes, $expiryAlerts);
+
+        if (empty($recipientsString)) {
+            return;
+        }
+
+        $recipients = array_filter(array_map('trim', explode(',', $recipientsString)));
+        if (empty($recipients)) {
             return;
         }
 

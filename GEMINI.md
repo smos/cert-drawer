@@ -23,7 +23,7 @@
 - **CLI:** `php artisan admin:setup {email}` for local admin management.
 
 ## Roadmap / Next Steps
-- Automated Expiry Notifications (Email/Webhooks).
+- Automated Expiry Notifications (Email/Webhooks) (Implemented).
 - Scheduled auto-renewal for ACME certificates (Implemented).
-- Certificate chain management (Improved).
-- Improved search (search by serial, issuer).
+- Certificate chain management (Improved) (Implemented).
+- Improved search (search by serial, issuer) (Implemented).

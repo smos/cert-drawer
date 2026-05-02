@@ -172,6 +172,19 @@
     </div>
 
     <hr>
+    <h3>Webhook Notifications</h3>
+    <div style="margin-bottom:15px">
+        <label>Alert Webhook URL (POST)</label><br>
+        <input type="text" name="alert_webhook_url" value="{{ $settings['alert_webhook_url'] ?? '' }}" placeholder="https://hooks.example.com/certs" style="width:100%; padding:8px; border:1px solid #ddd;">
+        <small style="color: #666;">If set, a JSON POST request will be sent to this URL whenever an expiry alert is triggered.</small>
+    </div>
+    <div style="margin-bottom:15px">
+        <label>Webhook Secret Key (Optional Signature)</label><br>
+        <input type="password" name="alert_webhook_secret" value="{{ isset($settings['alert_webhook_secret']) ? '********' : '' }}" placeholder="Secret key for signing payload" style="width:100%; padding:8px; border:1px solid #ddd;">
+        <small style="color: #666;">If provided, the request will include an 'X-Hub-Signature-256' header containing the HMAC-SHA256 signature of the payload.</small>
+    </div>
+
+    <hr>
     <h3>Email Notifications</h3>
     <div style="margin-bottom:15px">
         <label>DNS Health Recipients (Comma-separated)</label><br>

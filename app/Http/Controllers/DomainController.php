@@ -66,7 +66,9 @@ class DomainController extends Controller
                   })
                   ->orWhereHas('certificates', function($q) use ($search) {
                       $q->where('thumbprint_sha1', 'like', "%{$search}%")
-                        ->orWhere('thumbprint_sha256', 'like', "%{$search}%");
+                        ->orWhere('thumbprint_sha256', 'like', "%{$search}%")
+                        ->orWhere('serial_number', 'like', "%{$search}%")
+                        ->orWhere('issuer', 'like', "%{$search}%");
                   });
             });
         }

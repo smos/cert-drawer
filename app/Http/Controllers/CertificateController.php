@@ -359,10 +359,12 @@ class CertificateController extends Controller
         }
 
         try {
+            $chain = $this->certService->getChain($certificate, false);
             $pfxData = $this->certService->generatePfx(
                 $certificate->certificate,
                 decrypt($certificate->private_key),
-                $password
+                $password,
+                $chain
             );
 
             $certificate->update(['pfx_password' => encrypt($password)]);
@@ -392,10 +394,12 @@ class CertificateController extends Controller
         }
 
         try {
+            $chain = $this->certService->getChain($certificate, false);
             $pfxData = $this->certService->generateLegacyPfx(
                 $certificate->certificate,
                 decrypt($certificate->private_key),
-                $password
+                $password,
+                $chain
             );
 
             $certificate->update(['pfx_password' => encrypt($password)]);
@@ -472,6 +476,13 @@ class CertificateController extends Controller
                 return response($certificate->certificate)
                     ->header('Content-Type', 'application/x-x509-ca-cert')
                     ->header('Content-Disposition', 'attachment; filename="' . $certificate->domain->name . '.cer"');
+            case 'chain':
+                $chain = $this->certService->getChain($certificate);
+                $content = $certificate->certificate . "\n" . implode("\n", $chain);
+                AuditLog::log('cert_chain_download', "Downloaded certificate chain for domain: {$certificate->domain->name}");
+                return response($content)
+                    ->header('Content-Type', 'application/x-pem-file')
+                    ->header('Content-Disposition', 'attachment; filename="' . $certificate->domain->name . '-chain.pem"');
             case 'csr':
                 AuditLog::log('csr_download', "Downloaded CSR for domain: {$certificate->domain->name}");
                 return response($certificate->csr)
