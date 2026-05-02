@@ -183,8 +183,9 @@
 </head>
 <body>
     <nav>
-        <h1>Cert Drawer</h1>
+        <h1 style="cursor: pointer;" onclick="window.location.href='{{ route('dashboard') }}'">Cert Drawer</h1>
         @auth
+            <a href="{{ route('dashboard') }}">Dashboard</a>
             <a href="{{ route('domains.index') }}">Domains</a>
             <a href="{{ route('domains.authorities') }}">Authorities</a>
             @if(Auth::user()->hasAccessTo('auth'))

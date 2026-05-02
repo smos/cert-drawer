@@ -18,7 +18,8 @@ Route::get('/setup', [SetupController::class, 'index'])->name('setup.index');
 Route::post('/setup', [SetupController::class, 'store'])->name('setup.store');
 
 Route::middleware('auth')->group(function () {
-    Route::get('/', [DomainController::class, 'index'])->name('domains.index');
+    Route::get('/', [\App\Http\Controllers\DashboardController::class, 'index'])->name('dashboard');
+    Route::get('/domains', [DomainController::class, 'index'])->name('domains.index');
     Route::get('/authorities', [DomainController::class, 'caIndex'])->name('domains.authorities');
     Route::post('/domains', [DomainController::class, 'store'])->name('domains.store');
     Route::post('/domains/import-cert', [DomainController::class, 'importCert'])->name('domains.import-cert');
