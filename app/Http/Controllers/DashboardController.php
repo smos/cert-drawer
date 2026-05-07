@@ -10,17 +10,34 @@ use Carbon\Carbon;
 
 class DashboardController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        $startOfCalendar = Carbon::now()->startOfDay();
-        $endOfCalendar = Carbon::now()->addWeeks(4)->endOfDay();
+        $search = $request->input('search');
+        $startOfCalendar = Carbon::now()->startOfWeek(Carbon::MONDAY)->startOfDay();
+        $endOfCalendar = $startOfCalendar->copy()->addWeeks(4)->endOfDay();
 
         // Get all issued certificates expiring in the next 4 weeks
-        $expiringCerts = Certificate::where('status', 'issued')
+        $query = Certificate::where('status', 'issued')
             ->whereNull('archived_at')
             ->whereBetween('expiry_date', [$startOfCalendar, $endOfCalendar])
-            ->with('domain')
-            ->get();
+            ->with('domain');
+
+        if ($search) {
+            $query->where(function($q) use ($search) {
+                $q->whereHas('domain', function($dq) use ($search) {
+                    $dq->where('name', 'like', "%{$search}%")
+                      ->orWhereHas('tags', function($tq) use ($search) {
+                          $tq->where('name', 'like', "%{$search}%");
+                      });
+                })
+                ->orWhere('thumbprint_sha1', 'like', "%{$search}%")
+                ->orWhere('thumbprint_sha256', 'like', "%{$search}%")
+                ->orWhere('serial_number', 'like', "%{$search}%")
+                ->orWhere('issuer', 'like', "%{$search}%");
+            });
+        }
+
+        $expiringCerts = $query->get();
 
         // Filter by user access
         $user = Auth::user();

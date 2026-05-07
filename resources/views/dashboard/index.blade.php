@@ -4,18 +4,27 @@
 <div class="container-fluid">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
         <h2 style="margin: 0;">Expiration Calendar</h2>
-        <div style="display: flex; gap: 20px; font-size: 0.9rem;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-                <div style="width: 15px; height: 15px; background: #fff; border: 1px solid #ddd; border-radius: 3px;"></div>
-                <span>Weekday</span>
-            </div>
-            <div style="display: flex; align-items: center; gap: 8px;">
-                <div style="width: 15px; height: 15px; background: #f9f9f9; border: 1px solid #ddd; border-radius: 3px;"></div>
-                <span>Weekend</span>
-            </div>
-            <div style="display: flex; align-items: center; gap: 8px;">
-                <div style="width: 15px; height: 15px; border: 2px solid var(--accent); border-radius: 3px;"></div>
-                <span>Today</span>
+        <div style="display: flex; gap: 10px; align-items: center;">
+            <form action="{{ route('dashboard') }}" method="GET" style="display: flex; gap: 5px;">
+                <input type="text" name="search" value="{{ request('search') }}" placeholder="Search domains or tags..." style="padding: 8px; border: 1px solid #ddd; border-radius: 4px; width: 200px;">
+                <button type="submit" class="btn">Search</button>
+                @if(request('search'))
+                    <a href="{{ route('dashboard') }}" class="btn" style="text-decoration: none; display: flex; align-items: center; background: #95a5a6; color: white;">Clear</a>
+                @endif
+            </form>
+            <div style="display: flex; gap: 20px; font-size: 0.9rem; margin-left: 10px; border-left: 1px solid #ddd; padding-left: 20px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="width: 15px; height: 15px; background: #fff; border: 1px solid #ddd; border-radius: 3px;"></div>
+                    <span>Weekday</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="width: 15px; height: 15px; background: #f9f9f9; border: 1px solid #ddd; border-radius: 3px;"></div>
+                    <span>Weekend</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="width: 15px; height: 15px; border: 2px solid var(--accent); border-radius: 3px;"></div>
+                    <span>Today</span>
+                </div>
             </div>
         </div>
     </div>

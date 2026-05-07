@@ -250,7 +250,7 @@
 
     <div id="password-modal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:white; padding:30px; box-shadow:0 0 20px rgba(0,0,0,0.5); z-index:1200; border-radius:8px; width:400px;">
         <h3 id="password-modal-title">Enter Password</h3>
-        <input type="password" id="password-modal-input" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:4px; margin-bottom:15px;">
+        <input type="password" id="password-modal-input" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:4px; margin-bottom:15px;" autocomplete="new-password">
         <div style="text-align:right;">
             <button class="btn" id="password-modal-cancel">Cancel</button>
             <button class="btn btn-primary" id="password-modal-submit">Submit</button>
@@ -440,7 +440,8 @@
                 <div style="margin-bottom: 15px;">
                     <label style="font-weight: 600; font-size: 0.85rem; display:block; margin-bottom:5px;">Notes</label>
                     <textarea id="domain-notes" style="width:100%; height:60px; padding:8px; border:1px solid #ddd; border-radius:4px; font-family:inherit; font-size:0.9rem;">${domain.notes || ''}</textarea>
-                    <div style="text-align:right; margin-top:5px;">
+                    <div style="text-align:right; margin-top:5px; display: flex; align-items: center; justify-content: flex-end; gap: 10px;">
+                        <span id="notes-saved-indicator" style="color: #27ae60; font-size: 0.85rem; display: none; font-weight: 600;">✓ Saved!</span>
                         <button class="btn btn-sm btn-primary" onclick="saveNotes(${domain.id})">Save Notes</button>
                     </div>
                 </div>
@@ -449,7 +450,7 @@
                     ${(domain.tags || []).map(t => `<span class="tag ${t.type}" onclick="removeTag(${t.id}, ${domain.id})" title="Click to remove">${t.name} <small>&times;</small></span>`).join('')}
                 </div>
                 <div style="display:flex; gap:5px; margin-bottom:15px;">
-                    <input type="text" id="new-tag-name" placeholder="Add tag (e.g. Server A)" style="flex:1; padding:5px; border:1px solid #ddd;">
+                    <input type="text" id="new-tag-name" placeholder="Add tag (e.g. Server A)" style="flex:1; padding:5px; border:1px solid #ddd;" autocomplete="off">
                     <select id="new-tag-type" style="padding:5px;">
                         <option value="server">Private/Public (Server)</option>
                         <option value="client">Public only (Client)</option>
@@ -490,8 +491,8 @@
                             <label><input type="radio" name="csr_option" value="upload"> Upload Existing CSR</label>
                         </div>
                         <div id="custom-csr-options" style="display:none; margin-bottom:10px;">
-                            <label>Common Name:</label><input type="text" id="csr-cn" value="${domain.name}" style="width:100%; padding:8px; border:1px solid #ddd; margin-bottom:5px;"><br>
-                            <label>Subject Alternative Names (comma separated):</label><textarea id="csr-sans" placeholder="example.com,www.example.com" style="width:100%; padding:8px; border:1px solid #ddd;"></textarea>
+                            <label>Common Name:</label><input type="text" id="csr-cn" value="${domain.name}" style="width:100%; padding:8px; border:1px solid #ddd; margin-bottom:5px;" autocomplete="off"><br>
+                            <label>Subject Alternative Names (comma separated):</label><textarea id="csr-sans" placeholder="example.com,www.example.com" style="width:100%; padding:8px; border:1px solid #ddd;" autocomplete="off"></textarea>
                         </div>
                         <div id="upload-csr-options" style="display:none; margin-bottom:10px;">
                             <label>Paste CSR here:</label><textarea id="uploaded-csr" placeholder="-----BEGIN CERTIFICATE REQUEST-----..." style="width:100%; height:100px; padding:8px; border:1px solid #ddd;"></textarea>
@@ -784,6 +785,8 @@
 
         function saveNotes(domainId) {
             const notes = document.getElementById('domain-notes').value;
+            const indicator = document.getElementById('notes-saved-indicator');
+            
             fetch(`/domains/${domainId}/notes`, {
                 method: 'POST',
                 headers: {
@@ -794,7 +797,12 @@
             })
             .then(res => res.json())
             .then(() => {
-                alert('Notes saved successfully');
+                if (indicator) {
+                    indicator.style.display = 'inline';
+                    setTimeout(() => {
+                        indicator.style.display = 'none';
+                    }, 2000);
+                }
             });
         }
 
