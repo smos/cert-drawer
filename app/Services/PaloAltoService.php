@@ -503,11 +503,13 @@ class PaloAltoService
                 if ($resp->successful()) {
                     $xml = simplexml_load_string($resp->body());
                     if ($xml && (string)$xml['status'] === 'success') {
-                        // The certificate element is inside result -> ssl-tls-service-profile -> entry
+                        // The certificate element can be at different levels depending on API version/response structure
                         if (isset($xml->result->{'ssl-tls-service-profile'}->entry->certificate)) {
                             $current = (string)$xml->result->{'ssl-tls-service-profile'}->entry->certificate;
                         } elseif (isset($xml->result->entry->certificate)) {
                             $current = (string)$xml->result->entry->certificate;
+                        } elseif (isset($xml->result->certificate)) {
+                            $current = (string)$xml->result->certificate;
                         }
                     }
                 }

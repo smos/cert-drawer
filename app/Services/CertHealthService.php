@@ -76,7 +76,7 @@ class CertHealthService
         
         $ips = [];
         // Resolve using local system DNS (internal DNS)
-        $ips = array_merge($ips, $this->resolveIps($domain->name, null));
+        $ips = array_merge($ips, $this->resolveIps($checkHost, null));
 
         // Deduplicate IPs
         $uniqueIps = [];

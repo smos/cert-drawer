@@ -213,6 +213,65 @@ class FortigateService
     }
 
     /**
+     * Remove expired certificates for the given domain from the Fortigate device.
+     */
+    public function cleanupExpiredCerts(Automation $automation, string $domainName)
+    {
+        $host = $automation->hostname;
+        $token = $automation->getDecryptedPassword();
+        
+        $safeName = str_replace(['*', '.'], ['wildcard', '_'], $domainName);
+        $prefix = "auto_{$safeName}_";
+
+        $certs = $this->listCerts($automation);
+        $deleted = 0;
+
+        foreach ($certs as $cert) {
+            $name = $cert['name'] ?? '';
+            
+            // Never cleanup the one we JUST imported (latest in DB)
+            $latestId = $automation->domain->certificates()->where('status', 'issued')->latest()->first()?->id;
+            if ($name === "auto_{$safeName}_{$latestId}") {
+                continue;
+            }
+
+            if (str_starts_with($name, $prefix)) {
+                // Extract the ID from the name auto_domain_ID
+                $parts = explode('_', $name);
+                $id = end($parts);
+                
+                $localCert = \App\Models\Certificate::find($id);
+                
+                // Get details for expiry check
+                $details = $this->getCert($automation, $name);
+                $expiryTime = !empty($details['valid_to']) ? strtotime($details['valid_to']) : null;
+                $isExpiredOnDevice = $expiryTime && $expiryTime < time();
+                
+                $isOldInDb = !$localCert || $localCert->archived_at || ($localCert->expiry_date && $localCert->expiry_date->isPast());
+
+                if ($isExpiredOnDevice || $isOldInDb) {
+                    Log::info("Cleaning up old Fortigate certificate: {$name}");
+                    
+                    $url = "https://{$host}/api/v2/cmdb/certificate/local/" . urlencode($name) . "/?vdom=root";
+
+                    $response = Http::withoutVerifying()
+                        ->withHeaders(['Authorization' => "Bearer {$token}"])
+                        ->delete($url);
+
+                    if ($response->successful()) {
+                        $deleted++;
+                    } else {
+                        // Fortigate might block deletion if it is still in use
+                        Log::warning("Failed to delete Fortigate certificate {$name} (might still be in use): " . $response->body());
+                    }
+                }
+            }
+        }
+
+        return $deleted;
+    }
+
+    /**
      * Check the status of the automation on the device.
      */
     public function checkStatus(Automation $automation, Certificate $certificate)
