@@ -69,6 +69,6 @@
     @endif
 
     <hr>
-    <p><small>This is an automated notification from Cert Drawer.</small></p>
+    <p><small>This is an automated notification from <a href="{{ config('app.url') }}">Cert Drawer</a>.</small></p>
 </body>
 </html>

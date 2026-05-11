@@ -53,7 +53,7 @@
             <p>Please log in to the Cert Drawer to investigate and retry the deployment manually if needed.</p>
         </div>
         <div class="footer">
-            This is an automated message from Cert Drawer.
+            This is an automated message from <a href="{{ config('app.url') }}">Cert Drawer</a>.
         </div>
     </div>
 </body>

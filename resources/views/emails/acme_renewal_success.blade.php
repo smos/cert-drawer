@@ -39,7 +39,7 @@
             <p>Any configured automations for this domain have also been triggered.</p>
         </div>
         <div class="footer">
-            This is an automated message from Cert Drawer.
+            This is an automated message from <a href="{{ config('app.url') }}">Cert Drawer</a>.
         </div>
     </div>
 </body>

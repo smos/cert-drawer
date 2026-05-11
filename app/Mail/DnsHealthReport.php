@@ -20,7 +20,7 @@ class DnsHealthReport extends Mailable
 
     public function build()
     {
-        return $this->subject('DNS Health Check Report - ' . config('app.name'))
+        return $this->subject('DNS Health Check Report')
                     ->view('emails.dns_health');
     }
 }

@@ -15,6 +15,6 @@ class TestMail extends Mailable
     {
         $fromName = Setting::where('key', 'mail_from_name')->value('value') ?? config('mail.from.name');
         return $this->subject('Test Email from ' . $fromName)
-                    ->html('<h1>Success!</h1><p>If you are reading this, your SMTP settings are configured correctly.</p><p>Sent at: ' . now()->toDateTimeString() . '</p>');
+                    ->html('<h1>Success!</h1><p>If you are reading this, your SMTP settings are configured correctly.</p><p>Sent at: ' . now()->toDateTimeString() . '</p><hr><p><small>Sent from <a href="' . config('app.url') . '">Cert Drawer</a></small></p>');
     }
 }

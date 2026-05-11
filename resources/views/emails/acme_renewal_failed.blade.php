@@ -29,7 +29,7 @@
         <p>Please log in to Cert Drawer and check the Audit Logs or ACME service status for more details.</p>
         
         <hr>
-        <p style="font-size: 0.8rem; color: #888;">This is an automated notification from Cert Drawer.</p>
+        <p style="font-size: 0.8rem; color: #888;">This is an automated notification from <a href="{{ config('app.url') }}">Cert Drawer</a>.</p>
     </div>
 </body>
 </html>

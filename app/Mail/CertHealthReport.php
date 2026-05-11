@@ -29,7 +29,7 @@ class CertHealthReport extends Mailable
 
     public function build()
     {
-        return $this->subject('Certificate Health Alert - ' . config('app.name'))
+        return $this->subject('Certificate Health Alert')
                     ->view('emails.cert_health');
     }
 }
