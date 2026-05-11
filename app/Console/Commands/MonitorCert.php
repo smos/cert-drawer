@@ -83,48 +83,8 @@ class MonitorCert extends Command
 
     protected function triggerWebhooks($changes, $expiryAlerts)
     {
-        if (empty($changes) && empty($expiryAlerts)) {
-            return;
-        }
-
-        $webhookUrl = Setting::where('key', 'alert_webhook_url')->value('value');
-        if (empty($webhookUrl)) {
-            return;
-        }
-
-        $secret = Setting::where('key', 'alert_webhook_secret')->value('value');
-        
-        $payload = [
-            'timestamp' => now()->toIso8601String(),
-            'event' => 'cert_health_alert',
-            'changes' => $changes,
-            'expiry_alerts' => $expiryAlerts,
-        ];
-
-        $jsonPayload = json_encode($payload);
-        
-        $headers = [
-            'Content-Type' => 'application/json',
-            'User-Agent' => 'CertDrawer-Monitor/1.0',
-        ];
-
-        if (!empty($secret)) {
-            $headers['X-Hub-Signature-256'] = 'sha256=' . hash_hmac('sha256', $jsonPayload, $secret);
-        }
-
-        try {
-            $response = \Illuminate\Support\Facades\Http::withHeaders($headers)
-                ->timeout(10)
-                ->post($webhookUrl, $payload);
-
-            if ($response->successful()) {
-                $this->info("Webhook sent successfully to {$webhookUrl}");
-            } else {
-                $this->error("Webhook failed with status {$response->status()} at {$webhookUrl}");
-            }
-        } catch (\Exception $e) {
-            $this->error("Webhook delivery failed: " . $e->getMessage());
-        }
+        $webhookService = new \App\Services\WebhookService();
+        $webhookService->sendAlert($changes, $expiryAlerts);
     }
 
     protected function sendNotification($startTime)

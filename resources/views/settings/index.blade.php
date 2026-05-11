@@ -183,6 +183,9 @@
         <input type="password" name="alert_webhook_secret" value="{{ isset($settings['alert_webhook_secret']) ? '********' : '' }}" placeholder="Secret key for signing payload" style="width:100%; padding:8px; border:1px solid #ddd;">
         <small style="color: #666;">If provided, the request will include an 'X-Hub-Signature-256' header containing the HMAC-SHA256 signature of the payload.</small>
     </div>
+    <div style="margin-bottom:15px">
+        <button type="button" onclick="sendTestWebhook()" class="btn" style="background: #6c757d; color: white;">Test Webhook</button>
+    </div>
 
     <hr>
     <h3>Email Notifications</h3>
@@ -215,13 +218,14 @@
 <script>
     function sendTestEmail() {
         const form = document.getElementById('settings-form');
-        const originalAction = form.action;
-        
-        // Temporarily change form action to the test-email route
         form.action = "{{ route('settings.test-email') }}";
         form.submit();
-        
-        // The page will reload anyway, so no need to reset action here.
+    }
+
+    function sendTestWebhook() {
+        const form = document.getElementById('settings-form');
+        form.action = "{{ route('settings.test-webhook') }}";
+        form.submit();
     }
 </script>
 @endsection

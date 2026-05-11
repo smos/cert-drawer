@@ -38,6 +38,30 @@ class SettingController extends Controller
         }
     }
 
+    public function testWebhook(Request $request)
+    {
+        // Save settings first
+        $this->update($request);
+
+        $url = $request->input('alert_webhook_url');
+        $secret = $request->input('alert_webhook_secret');
+        
+        if ($secret === '********') {
+            $secret = Setting::where('key', 'alert_webhook_secret')->value('value');
+        }
+
+        if (empty($url)) {
+            return back()->with('error', 'Please provide a webhook URL.');
+        }
+
+        $webhookService = new \App\Services\WebhookService();
+        if ($webhookService->sendTest($url, $secret)) {
+            return back()->with('success', "Test webhook sent successfully to {$url}.");
+        } else {
+            return back()->with('error', "Failed to send test webhook. Check logs for details.");
+        }
+    }
+
     public function searchGroups(Request $request)
     {
         // Still needed for the domain drawer group search

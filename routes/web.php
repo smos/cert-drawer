@@ -59,6 +59,7 @@ Route::middleware('auth')->group(function () {
         Route::get('/settings', [SettingController::class, 'index'])->name('settings.index');
         Route::post('/settings', [SettingController::class, 'update'])->name('settings.update');
         Route::post('/settings/test-email', [SettingController::class, 'testEmail'])->name('settings.test-email');
+        Route::post('/settings/test-webhook', [SettingController::class, 'testWebhook'])->name('settings.test-webhook');
         Route::get('/settings/search-groups', [SettingController::class, 'searchGroups'])->name('settings.search-groups');
     });
 
