@@ -24,7 +24,7 @@ class AuthController extends Controller
         $adminGroups = $request->input('admin_groups', []);
         Setting::updateOrCreate(['key' => 'admin_groups'], ['value' => json_encode($adminGroups)]);
 
-        $granularAreas = ['auth', 'settings', 'automations', 'audit', 'dns', 'cert_health'];
+        $granularAreas = ['auth', 'settings', 'automations', 'audit', 'dns', 'cert_health', 'entra'];
         foreach ($granularAreas as $area) {
             $key = "access_groups_{$area}";
             $groups = $request->input($key, []);

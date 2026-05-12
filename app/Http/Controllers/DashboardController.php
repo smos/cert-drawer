@@ -39,10 +39,34 @@ class DashboardController extends Controller
 
         $expiringCerts = $query->get();
 
+        // Get expiring Entra ID secrets/certs
+        $entraQuery = \App\Models\EntraAppSecret::with('app')
+            ->whereHas('app', function($q) {
+                $q->where('is_enabled', true);
+            })
+            ->whereBetween('end_date', [$startOfCalendar, $endOfCalendar]);
+
+        if ($search) {
+            $entraQuery->whereHas('app', function($q) use ($search) {
+                $q->where('display_name', 'like', "%{$search}%")
+                  ->orWhere('app_id', 'like', "%{$search}%")
+                  ->orWhereHas('tags', function($tq) use ($search) {
+                      $tq->where('name', 'like', "%{$search}%");
+                  });
+            });
+        }
+        
+        $expiringEntra = $entraQuery->get();
+
         // Filter by user access
         $user = Auth::user();
         $expiringCerts = $expiringCerts->filter(function($cert) use ($user) {
             return $user->canAccess($cert->domain);
+        });
+
+        $expiringEntra = $expiringEntra->filter(function($secret) use ($user) {
+            if (empty($user->guid)) return true;
+            return $user->hasAccessTo('entra');
         });
 
         // Group by date
@@ -50,9 +74,24 @@ class DashboardController extends Controller
         foreach ($expiringCerts as $cert) {
             $date = Carbon::parse($cert->expiry_date)->format('Y-m-d');
             $events[$date][] = [
-                'domain_name' => $cert->domain->name,
-                'domain_id' => $cert->domain_id,
+                'type' => 'certificate',
+                'name' => $cert->domain->name,
+                'id' => $cert->domain_id,
                 'expiry_time' => Carbon::parse($cert->expiry_date)->format('H:i'),
+                'color' => '#e1f5fe',
+                'border' => '#3498db',
+            ];
+        }
+
+        foreach ($expiringEntra as $secret) {
+            $date = Carbon::parse($secret->end_date)->format('Y-m-d');
+            $events[$date][] = [
+                'type' => 'entra',
+                'name' => $secret->app->display_name . " (" . ($secret->display_name ?: $secret->type) . ")",
+                'id' => $secret->app->id,
+                'expiry_time' => Carbon::parse($secret->end_date)->format('H:i'),
+                'color' => '#fff3e0',
+                'border' => '#ff9800',
             ];
         }
 

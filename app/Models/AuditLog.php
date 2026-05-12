@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class AuditLog extends Model
 {
-    protected $fillable = ['user_id', 'action', 'description', 'ip_address', 'metadata'];
+    protected $fillable = ['user_id', 'action', 'description', 'ip_address', 'metadata', 'entra_app_id'];
 
     protected $casts = [
         'metadata' => 'array',
@@ -17,14 +17,20 @@ class AuditLog extends Model
         return $this->belongsTo(User::class);
     }
 
-    public static function log($action, $description = null, $metadata = [])
+    public function entraApp()
+    {
+        return $this->belongsTo(EntraApp::class, 'entra_app_id');
+    }
+
+    public static function log($action, $description = null, $metadata = [], $entraAppId = null)
     {
         return self::create([
             'user_id' => auth()->id(),
             'action' => $action,
             'description' => $description,
-            'ip_address' => request()->ip(),
+            'ip_address' => request()->ip() ?? '127.0.0.1',
             'metadata' => $metadata,
+            'entra_app_id' => $entraAppId,
         ]);
     }
 }

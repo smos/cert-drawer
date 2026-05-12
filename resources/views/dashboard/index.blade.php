@@ -47,9 +47,12 @@
                         <div class="day-number">{{ $day['date']->format('j') }} <span class="day-month">{{ $day['date']->format('M') }}</span></div>
                         <div class="day-events">
                             @foreach($day['events'] as $event)
-                                <div class="event-item" onclick="openDrawer({{ $event['domain_id'] }})" title="{{ $event['domain_name'] }} ({{ $event['expiry_time'] }})">
+                                <div class="event-item" 
+                                     onclick="{{ $event['type'] === 'certificate' ? 'openDrawer('.$event['id'].')' : 'openEntraDrawer('.$event['id'].')' }}" 
+                                     title="{{ $event['name'] }} ({{ $event['expiry_time'] }})"
+                                     style="background: {{ $event['color'] }}; border-left-color: {{ $event['border'] }};">
                                     <span class="event-time">{{ $event['expiry_time'] }}</span>
-                                    <span class="event-name">{{ $event['domain_name'] }}</span>
+                                    <span class="event-name">{{ $event['name'] }}</span>
                                 </div>
                             @endforeach
                         </div>

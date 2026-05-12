@@ -27,3 +27,4 @@ Schedule::command('cert:monitor')->cron("0 */{$interval} * * *");
 Schedule::command('certificates:archive')->dailyAt('01:00');
 Schedule::command('certificates:automation-cleanup')->dailyAt('01:30');
 Schedule::command('certificates:renew-acme')->dailyAt('02:00');
+Schedule::command('cert:sync-entra')->dailyAt('03:00');

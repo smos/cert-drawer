@@ -82,6 +82,14 @@ Route::middleware('auth')->group(function () {
         Route::post('/cert-health/import-log/{log}', [\App\Http\Controllers\CertHealthController::class, 'importFromLog'])->name('cert-health.import-log');
     });
 
+    Route::middleware('admin:entra')->group(function () {
+        Route::get('/entra', [\App\Http\Controllers\EntraAppController::class, 'index'])->name('entra.index');
+        Route::post('/entra/sync', [\App\Http\Controllers\EntraAppController::class, 'sync'])->name('entra.sync');
+        Route::get('/entra/{app}', [\App\Http\Controllers\EntraAppController::class, 'show'])->name('entra.show');
+        Route::post('/entra/{app}/notes', [\App\Http\Controllers\EntraAppController::class, 'updateNotes'])->name('entra.notes');
+        Route::post('/entra/{app}/tags', [\App\Http\Controllers\EntraAppController::class, 'addTag'])->name('entra.tags');
+    });
+
     Route::middleware('admin:automations')->group(function () {
         Route::get('/automations', [\App\Http\Controllers\AutomationController::class, 'index'])->name('automations.index');
         Route::post('/automations', [\App\Http\Controllers\AutomationController::class, 'store'])->name('automations.store');

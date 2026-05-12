@@ -113,6 +113,7 @@
             'audit' => ['label' => 'Audit Logs Access', 'color' => '#7f8c8d'],
             'dns' => ['label' => 'DNS Health Access', 'color' => '#d35400'],
             'cert_health' => ['label' => 'Cert Health Access', 'color' => '#c0392b'],
+            'entra' => ['label' => 'Entra ID Apps Access', 'color' => '#0078d4'],
         ];
     @endphp
 

@@ -200,6 +200,9 @@
             @if(Auth::user()->hasAccessTo('cert_health'))
                 <a href="{{ route('cert-health.index') }}">Cert Health</a>
             @endif
+            @if(Auth::user()->hasAccessTo('entra'))
+                <a href="{{ route('entra.index') }}">Entra ID Apps</a>
+            @endif
             @if(Auth::user()->hasAccessTo('automations'))
                 <a href="{{ route('automations.index') }}">Automations</a>
             @endif
@@ -1253,41 +1256,139 @@
         }
 
         function showCertificateDetails(certId) {
-            fetch(`/certificates/${certId}`)
+            // ... (rest of the function as it was)
+        }
+
+        function openEntraDrawer(appId) {
+            fetch(`/entra/${appId}`)
                 .then(res => res.json())
                 .then(data => {
-                    let html = `
-                        <table style="width:100%; border-collapse:collapse; font-size:0.9rem;">
-                            <tr style="border-bottom:1px solid #eee"><td style="padding:8px; font-weight:600; width:150px;">Type</td><td style="padding:8px;">${data.type}</td></tr>
-                            <tr style="border-bottom:1px solid #eee"><td style="padding:8px; font-weight:600;">Status</td><td style="padding:8px;">${data.status}</td></tr>
-                            <tr style="border-bottom:1px solid #eee"><td style="padding:8px; font-weight:600;">Issuer</td><td style="padding:8px;">${data.issuer || 'N/A'}</td></tr>
-                            <tr style="border-bottom:1px solid #eee"><td style="padding:8px; font-weight:600;">Valid From</td><td style="padding:8px;">${data.valid_from || 'N/A'}</td></tr>
-                            <tr style="border-bottom:1px solid #eee"><td style="padding:8px; font-weight:600;">Expires</td><td style="padding:8px;">${data.expiry_date || 'N/A'}</td></tr>
-                    `;
-
-                    if (data.type === 'Certificate') {
-                        html += `
-                            <tr style="border-bottom:1px solid #eee"><td style="padding:8px; font-weight:600;">Serial</td><td style="padding:8px; font-family:monospace;">${data.serial}</td></tr>
-                            <tr style="border-bottom:1px solid #eee"><td style="padding:8px; font-weight:600;">Signature</td><td style="padding:8px;">${data.signature_type}</td></tr>
-                            <tr style="border-bottom:1px solid #eee"><td style="padding:8px; font-weight:600;">Subject</td><td style="padding:8px; font-size:0.8rem;">${data.subject}</td></tr>
-                            <tr style="border-bottom:1px solid #eee"><td style="padding:8px; font-weight:600;">SANs</td><td style="padding:8px;">${data.sans.join(', ') || 'None'}</td></tr>
-                            <tr style="border-bottom:1px solid #eee"><td style="padding:8px; font-weight:600;">Thumbprint (SHA1)</td><td style="padding:8px; font-family:monospace; font-size:0.8rem;">${data.thumbprint_sha1 || 'N/A'}</td></tr>
-                            <tr style="border-bottom:1px solid #eee"><td style="padding:8px; font-weight:600;">Thumbprint (SHA256)</td><td style="padding:8px; font-family:monospace; font-size:0.8rem;">${data.thumbprint_sha256 || 'N/A'}</td></tr>
-                        `;
-                    } else if (data.type === 'CSR') {
-                        html += `
-                            <tr style="border-bottom:1px solid #eee"><td style="padding:8px; font-weight:600;">Subject</td><td style="padding:8px; font-size:0.8rem;">${data.subject}</td></tr>
-                            <tr style="border-bottom:1px solid #eee"><td style="padding:8px; font-weight:600;">SANs</td><td style="padding:8px;">${data.sans.join(', ') || 'None'}</td></tr>
-                            <tr><td colspan="2" style="padding:8px; font-weight:600;">CSR Body:</td></tr>
-                            <tr><td colspan="2" style="padding:8px;"><pre style="background:#f4f4f4; padding:10px; font-size:0.75rem; border-radius:4px; overflow-x:auto;">${data.csr_body}</pre></td></tr>
-                        `;
-                    }
-
-                    html += `</table>`;
-                    document.getElementById('details-content').innerHTML = html;
-                    document.getElementById('details-modal').style.display = 'block';
+                    renderEntraDrawer(data.app);
+                    drawer.classList.add('open');
                     overlay.classList.add('active');
                 });
+        }
+
+        function renderEntraDrawer(app) {
+            const content = document.getElementById('drawer-content');
+            let html = `
+                <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                    <h2 data-id="${app.id}" data-type="entra">${app.display_name}</h2>
+                    <button class="btn" onclick="closeDrawer()" style="background:none; border:none; font-size:1.5rem; cursor:pointer;">&times;</button>
+                </div>
+                <p style="color:#666; margin-top:-10px;">Application ID: ${app.app_id}</p>
+                <p style="color:#888; font-size:0.9rem; margin-top:-5px;">Object ID: ${app.object_id}</p>
+
+                <div style="margin-top:20px;">
+                    <h3>Secrets & Certificates</h3>
+                    <table style="width:100%; border-collapse: collapse; margin-top:10px;">
+                        <thead>
+                            <tr style="text-align:left; border-bottom:1px solid #eee;">
+                                <th style="padding:10px 5px;">Type</th>
+                                <th style="padding:10px 5px;">Name/Hint</th>
+                                <th style="padding:10px 5px;">Expires</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+
+            app.secrets.sort((a, b) => new Date(b.end_date) - new Date(a.end_date));
+
+            app.secrets.forEach(secret => {
+                const days = Math.ceil((new Date(secret.end_date) - new Date()) / (1000 * 60 * 60 * 24));
+                const isExpired = days <= 0;
+                let color = '#2ecc71';
+                if (isExpired) color = '#e74c3c';
+                else if (days <= 10) color = '#c0392b';
+                else if (days <= 30) color = '#f1c40f';
+
+                html += `
+                    <tr style="border-bottom:1px solid #f9f9f9; ${isExpired ? 'opacity: 0.5;' : ''}">
+                        <td style="padding:10px 5px;"><span class="tag ${secret.type === 'certificate' ? 'server' : 'client'}">${secret.type}</span></td>
+                        <td style="padding:10px 5px;">
+                            ${secret.display_name || 'No name'}<br>
+                            <small style="color:#888;">${secret.hint ? 'Hint: ' + secret.hint : (secret.thumbprint ? 'Thumb: ' + secret.thumbprint.substring(0,8) : '')}</small>
+                        </td>
+                        <td style="padding:10px 5px; color:${color}; font-weight:bold;">${new Date(secret.end_date).toLocaleDateString()}</td>
+                    </tr>
+                `;
+            });
+
+            if (app.secrets.length === 0) {
+                html += `<tr><td colspan="3" style="padding:20px; text-align:center; color:#888;">No secrets or certificates found.</td></tr>`;
+            }
+
+            html += `
+                        </tbody>
+                    </table>
+                </div>
+
+                <div style="margin-top:30px;">
+                    <h3>Notes</h3>
+                    <textarea id="entra-notes" style="width:100%; height:100px; padding:10px; border:1px solid #ddd; border-radius:4px; margin-top:5px;">${app.notes || ''}</textarea>
+                    <button class="btn btn-primary" onclick="updateEntraNotes(${app.id})" style="margin-top:5px;">Save Notes</button>
+                </div>
+
+                <div style="margin-top:30px;">
+                    <h3>Tags</h3>
+                    <div id="entra-tags-list" style="margin-bottom:10px;">
+                        ${app.tags.map(tag => `
+                            <span class="tag ${tag.type}" style="padding:5px 10px; margin-right:5px; position:relative; padding-right:25px;">
+                                ${tag.name}
+                                <span onclick="removeEntraTag(${tag.id}, ${app.id})" style="position:absolute; right:5px; cursor:pointer; color:#e74c3c;">&times;</span>
+                            </span>
+                        `).join('')}
+                    </div>
+                    <div style="display:flex; gap:5px;">
+                        <input type="text" id="new-entra-tag-name" placeholder="New tag..." style="flex:1; padding:5px;">
+                        <select id="new-entra-tag-type" style="padding:5px;">
+                            <option value="server">Blue</option>
+                            <option value="client">Green</option>
+                        </select>
+                        <button class="btn" onclick="addEntraTag(${app.id})">Add</button>
+                    </div>
+                </div>
+            `;
+
+            content.innerHTML = html;
+        }
+
+        function updateEntraNotes(appId) {
+            const notes = document.getElementById('entra-notes').value;
+            fetch(`/entra/${appId}/notes`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                },
+                body: JSON.stringify({ notes })
+            }).then(() => alert('Notes saved'));
+        }
+
+        function addEntraTag(appId) {
+            const name = document.getElementById('new-entra-tag-name').value;
+            const type = document.getElementById('new-entra-tag-type').value;
+            if (!name) return;
+
+            fetch(`/entra/${appId}/tags`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                },
+                body: JSON.stringify({ name, type })
+            }).then(res => res.json()).then(tag => {
+                openEntraDrawer(appId);
+            });
+        }
+
+        function removeEntraTag(tagId, appId) {
+            fetch(`/tags/${tagId}`, {
+                method: 'DELETE',
+                headers: {
+                    'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                }
+            }).then(() => openEntraDrawer(appId));
         }
 
     </script>
