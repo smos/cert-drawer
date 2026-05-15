@@ -272,19 +272,22 @@ class CertificateController extends Controller
             'metadata' => $certificate->metadata,
             'chain_incomplete' => false,
             'issuer_certificate_id' => $certificate->issuer_certificate_id,
+            'thumbprint_sha1' => $certificate->thumbprint_sha1,
+            'thumbprint_sha256' => $certificate->thumbprint_sha256,
+            'is_ca' => (bool) $certificate->is_ca,
+            'certificate' => $certificate->certificate,
+            'common_name' => $certificate->domain->name,
         ];
 
         if ($certificate->certificate) {
             $info = $this->certService->getCertInfo($certificate->certificate);
             $details['type'] = 'Certificate';
-            $details['subject'] = $info['name'] ?? 'Unknown';
-            $details['serial'] = $info['serialNumber'] ?? 'Unknown';
+            $details['common_name'] = $info['subject']['CN'] ?? $certificate->domain->name;
+            $details['serial_number'] = $info['serialNumber'] ?? 'Unknown';
             $details['signature_type'] = $info['signatureTypeSN'] ?? 'Unknown';
             $details['valid_from'] = isset($info['validFrom_time_t']) ? date('Y-m-d H:i:s', $info['validFrom_time_t']) : 'Unknown';
             $details['sans'] = $this->certService->extractSansFromCert($info);
             $details['full_subject'] = json_encode($info['subject'] ?? []);
-            $details['thumbprint_sha1'] = $certificate->thumbprint_sha1;
-            $details['thumbprint_sha256'] = $certificate->thumbprint_sha256;
 
             // Check chain completeness (simplified for details view)
             if (!$certificate->is_ca) {
@@ -314,12 +317,15 @@ class CertificateController extends Controller
             $details['csr_body'] = $certificate->csr;
             
             $subject = $this->certService->getCertInfoFromCsr($certificate->csr);
-            $details['subject'] = $subject['CN'] ?? 'Unknown';
+            $details['common_name'] = $subject['CN'] ?? $certificate->domain->name;
             $details['full_subject'] = json_encode($subject ?: []);
             $details['sans'] = $this->certService->extractSansFromCsr($certificate->csr);
         }
 
-        return response()->json($details);
+        return response()->json([
+            'success' => true,
+            'certificate' => $details
+        ]);
     }
 
     public function destroy(Certificate $certificate)

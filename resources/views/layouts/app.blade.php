@@ -335,7 +335,10 @@
                         overlay.classList.add('active');
 
                         if (certIdToOpen) {
-                            showCertificateDetails(certIdToOpen);
+                            // Small delay to ensure render is complete before we try to scroll/expand
+                            setTimeout(() => {
+                                showCertificateDetails(certIdToOpen);
+                            }, 100);
                         }
                     } catch (e) {
                         console.error('Render Error:', e);
@@ -1256,7 +1259,50 @@
         }
 
         function showCertificateDetails(certId) {
-            // ... (rest of the function as it was)
+            fetch(`/certificates/${certId}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (!data.success) {
+                        alert('Error: ' + data.message);
+                        return;
+                    }
+
+                    const cert = data.certificate;
+                    let html = `
+                        <div style="font-family: monospace; font-size: 0.9rem;">
+                            <p><strong>Common Name:</strong> ${cert.common_name}</p>
+                            <p><strong>Status:</strong> <span class="tag">${cert.status}</span></p>
+                            <p><strong>Issuer:</strong> ${cert.issuer || 'N/A'}</p>
+                            <p><strong>Valid From:</strong> ${cert.valid_from || 'N/A'}</p>
+                            <p><strong>Expiry Date:</strong> ${cert.expiry_date || 'N/A'}</p>
+                            <p><strong>Serial Number:</strong> ${cert.serial_number || 'N/A'}</p>
+                            <p><strong>SHA1 Thumbprint:</strong> ${cert.thumbprint_sha1 || 'N/A'}</p>
+                            <p><strong>SHA256 Thumbprint:</strong> ${cert.thumbprint_sha256 || 'N/A'}</p>
+                            <p><strong>Is CA:</strong> ${cert.is_ca ? 'Yes' : 'No'}</p>
+                            <hr>
+                            <p><strong>Public Key (PEM):</strong></p>
+                            <textarea readonly style="width: 100%; height: 150px; font-size: 0.8rem; padding: 10px; background: #f8f9fa; border: 1px solid #ddd;">${cert.certificate || 'N/A'}</textarea>
+                        </div>
+                    `;
+
+                    document.getElementById('details-content').innerHTML = html;
+                    document.getElementById('details-modal').style.display = 'block';
+                    overlay.classList.add('active');
+                    
+                    // If we have a specific certificate to highlight in the history list, try to expand it
+                    const certItemHeader = document.querySelector(`[onclick*="showCertificateDetails(${certId})"]`);
+                    if (certItemHeader) {
+                        const historyItem = certItemHeader.closest('.cert-item');
+                        if (historyItem) {
+                            const collapsible = historyItem.querySelector('.collapsible');
+                            if (collapsible) collapsible.classList.add('active');
+                            historyItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    }
+                })
+                .catch(err => {
+                    alert('Error loading certificate details: ' + err.message);
+                });
         }
 
         function openEntraDrawer(appId) {
