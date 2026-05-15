@@ -351,6 +351,16 @@ class PaloAltoService
                         $setUrl = "https://{$host}/api/?type=config&action=set&xpath=" . urlencode($setPath) . "&element=" . urlencode("<member>{$newCertName}</member>");
                         $this->executeSet($setUrl, $key, $ruleName, $errors);
                     }
+
+                    // Cleanup old members from the rule
+                    foreach ($existingMembers as $member) {
+                        if (str_starts_with($member, $oldCertPrefix) && $member !== $newCertName) {
+                            Log::info("Removing old certificate '{$member}' from Palo Alto Inbound Inspection Rule '{$ruleName}'");
+                            $delPath = "{$xpath}/entry[@name='{$ruleName}']/type/ssl-inbound-inspection/certificates/member[text()='{$member}']";
+                            $delUrl = "https://{$host}/api/?type=config&action=delete&xpath=" . urlencode($delPath);
+                            $this->executeSet($delUrl, $key, $ruleName, $errors);
+                        }
+                    }
                 }
             }
         }
@@ -377,6 +387,38 @@ class PaloAltoService
     }
 
     /**
+     * Check if a certificate on the device is expired based on local DB or device info.
+     */
+    protected function isCertExpired(string $name, ?array $deviceCertInfo = null)
+    {
+        $parts = explode('_', $name);
+        $id = end($parts);
+        
+        if (is_numeric($id)) {
+            $localCert = \App\Models\Certificate::find($id);
+            if ($localCert) {
+                // If archived or expiry date is past, it's expired
+                if ($localCert->archived_at || ($localCert->expiry_date && $localCert->expiry_date->isPast())) {
+                    return true;
+                }
+                return false; // Valid in our DB
+            }
+        }
+        
+        // Fallback to device-reported expiry if available
+        if ($deviceCertInfo && !empty($deviceCertInfo['expiry']) && $deviceCertInfo['expiry'] !== 'unknown') {
+             $expiryTime = strtotime($deviceCertInfo['expiry']);
+             $now = time();
+             Log::debug("Checking expiry for {$name}: Expiry {$expiryTime} vs Now {$now}");
+             if ($expiryTime && $expiryTime < $now) {
+                 return true;
+             }
+        }
+        
+        return false;
+    }
+
+    /**
      * Remove expired certificates for the given domain from the Palo Alto device.
      */
     public function cleanupExpiredCerts(Automation $automation, string $domainName)
@@ -392,27 +434,22 @@ class PaloAltoService
 
         foreach ($certs as $cert) {
             $name = $cert['name'];
-            // Never cleanup the one we JUST imported in this session
-            if ($name === "auto_{$safeName}_" . $automation->domain->certificates()->where('status', 'issued')->latest()->first()?->id) {
-                continue;
-            }
-
+            
             if (str_starts_with($name, $prefix)) {
-                // Extract the ID from the name auto_domain_ID
-                $parts = explode('_', $name);
-                $id = end($parts);
+                $fullInfo = $this->getCert($automation, $name);
                 
-                $localCert = \App\Models\Certificate::find($id);
-                // If the certificate is not found in our DB OR is marked as expired/archived in our DB
-                // OR if the expiry on the device is in the past (only if expiry is actually present)
-                $expiryTime = !empty($cert['expiry']) ? strtotime($cert['expiry']) : null;
-                $isExpiredOnDevice = $expiryTime && $expiryTime < time();
-                
-                $isOldInDb = !$localCert || $localCert->archived_at || ($localCert->expiry_date && $localCert->expiry_date->isPast());
-
-                if ($isExpiredOnDevice || $isOldInDb) {
-                    Log::info("Cleaning up old Palo Alto certificate: {$name}");
+                if ($this->isCertExpired($name, $fullInfo)) {
+                    Log::info("Cleaning up EXPIRED Palo Alto certificate: {$name}");
                     
+                    // 1. Explicitly remove references from known rulebases/profiles
+                    // This prevents "reference count not zero" errors
+                    try {
+                        $this->removeCertificateReferences($automation, $name, $domainName);
+                    } catch (Exception $e) {
+                        Log::warning("Failed to remove references for {$name} before deletion: " . $e->getMessage());
+                    }
+
+                    // 2. Delete the certificate
                     $xpath = "/config/shared/certificate/entry[@name='{$name}']";
                     $url = "https://{$host}/api/?type=config&action=delete&xpath=" . urlencode($xpath);
 
@@ -421,10 +458,18 @@ class PaloAltoService
                         ->post($url);
 
                     if ($response->successful()) {
-                        $deleted++;
+                        $xml = simplexml_load_string($response->body());
+                        if ($xml && (string)$xml['status'] === 'success') {
+                            $deleted++;
+                        } else {
+                            $msg = $xml ? (string)$xml->msg : "Unknown API error";
+                            Log::error("Failed to delete Palo Alto certificate {$name}: " . $msg);
+                        }
                     } else {
-                        Log::error("Failed to delete Palo Alto certificate {$name}: " . $response->body());
+                        Log::error("Failed to delete Palo Alto certificate {$name} (HTTP {$response->status()}): " . $response->body());
                     }
+                } else {
+                    Log::info("Skipping Palo Alto certificate {$name} - it is still valid.");
                 }
             }
         }
@@ -434,6 +479,73 @@ class PaloAltoService
         }
 
         return $deleted;
+    }
+
+    /**
+     * Specifically remove all references to a certificate from profiles and rules.
+     */
+    protected function removeCertificateReferences(Automation $automation, string $certName, string $domainName)
+    {
+        $host = $automation->hostname;
+        $key = $automation->getDecryptedPassword();
+        $errors = [];
+
+        // 1. Check SSL/TLS Profiles
+        $profilesString = $automation->config['profiles_string'] ?? '';
+        if (!empty($profilesString)) {
+            $profiles = array_filter(array_map('trim', explode(',', $profilesString)));
+            foreach ($profiles as $profileName) {
+                // We only clear it if it's currently set to THIS specific expired cert
+                $xpath = "/config/shared/ssl-tls-service-profile/entry[@name='{$profileName}']/certificate";
+                $urlGet = "https://{$host}/api/?type=config&action=get&xpath=" . urlencode($xpath);
+                $resp = Http::withoutVerifying()->withHeaders(['X-PAN-KEY' => $key])->get($urlGet);
+                
+                if ($resp->successful()) {
+                    $xml = simplexml_load_string($resp->body());
+                    $current = (string)($xml->result->certificate ?? $xml->result->entry->certificate ?? '');
+                    if ($current === $certName) {
+                        Log::info("Unlinking expired cert {$certName} from Profile {$profileName}");
+                        $urlDel = "https://{$host}/api/?type=config&action=delete&xpath=" . urlencode($xpath);
+                        Http::withoutVerifying()->withHeaders(['X-PAN-KEY' => $key])->post($urlDel);
+                    }
+                }
+            }
+        }
+
+        // 2. Check Decryption Rules
+        $xpathRules = "/config/devices/entry[@name='localhost.localdomain']/vsys/entry[@name='vsys1']/rulebase/decryption/rules";
+        $urlRules = "https://{$host}/api/?type=config&action=get&xpath=" . urlencode($xpathRules);
+        $respRules = Http::withoutVerifying()->withHeaders(['X-PAN-KEY' => $key])->get($urlRules);
+
+        if ($respRules->successful()) {
+            $xml = simplexml_load_string($respRules->body());
+            if ($xml && isset($xml->result->rules->entry)) {
+                foreach ($xml->result->rules->entry as $rule) {
+                    $ruleName = (string)$rule['name'];
+                    
+                    // Handle SSL Forward Proxy
+                    if (isset($rule->type->{'ssl-forward-proxy'}->certificate)) {
+                        if ((string)$rule->type->{'ssl-forward-proxy'}->certificate === $certName) {
+                            Log::info("Removing expired cert {$certName} from Forward Proxy Rule '{$ruleName}'");
+                            $delPath = "{$xpathRules}/entry[@name='{$ruleName}']/type/ssl-forward-proxy/certificate";
+                            $delUrl = "https://{$host}/api/?type=config&action=delete&xpath=" . urlencode($delPath);
+                            $this->executeSet($delUrl, $key, $ruleName, $errors);
+                        }
+                    } 
+                    // Handle SSL Inbound Inspection
+                    elseif (isset($rule->type->{'ssl-inbound-inspection'}->certificates->member)) {
+                        foreach ($rule->type->{'ssl-inbound-inspection'}->certificates->member as $member) {
+                            if ((string)$member === $certName) {
+                                Log::info("Removing expired cert {$certName} from Inbound Inspection Rule '{$ruleName}'");
+                                $delPath = "{$xpathRules}/entry[@name='{$ruleName}']/type/ssl-inbound-inspection/certificates/member[text()='{$certName}']";
+                                $delUrl = "https://{$host}/api/?type=config&action=delete&xpath=" . urlencode($delPath);
+                                $this->executeSet($delUrl, $key, $ruleName, $errors);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /**
