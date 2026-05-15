@@ -15,7 +15,41 @@
 
 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
     <h2>Device Automations</h2>
-    <button class="btn btn-primary" onclick="openAddModal()">+ Add Automation</button>
+    <div style="display: flex; gap: 10px; align-items: center;">
+        <div style="background: white; padding: 10px 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); font-size: 0.85rem; display: flex; gap: 20px;">
+            <div>
+                <span style="color: #666;">Scheduler Heartbeat:</span> 
+                @if($schedulerLastRun)
+                    <strong style="color: {{ \Carbon\Carbon::parse($schedulerLastRun)->isAfter(now()->subMinutes(5)) ? '#27ae60' : '#c0392b' }};">
+                        {{ \Carbon\Carbon::parse($schedulerLastRun)->diffForHumans() }}
+                    </strong>
+                @else
+                    <strong style="color: #c0392b;">Never</strong>
+                @endif
+            </div>
+            <div>
+                <span style="color: #666;">Last Auto-Cleanup:</span>
+                @if($lastCleanup)
+                    <strong style="color: #2980b9;" title="{{ $lastCleanup->created_at }}">
+                        {{ $lastCleanup->created_at->diffForHumans() }}
+                    </strong>
+                @else
+                    <strong style="color: #888;">No history</strong>
+                @endif
+            </div>
+            <div>
+                <span style="color: #666;">Last Archive:</span>
+                @if($lastArchive)
+                    <strong style="color: #2980b9;" title="{{ $lastArchive->created_at }}">
+                        {{ $lastArchive->created_at->diffForHumans() }}
+                    </strong>
+                @else
+                    <strong style="color: #888;">No history</strong>
+                @endif
+            </div>
+        </div>
+        <button class="btn btn-primary" onclick="openAddModal()">+ Add Automation</button>
+    </div>
 </div>
 
 <div class="table-responsive" style="background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); overflow: hidden;">

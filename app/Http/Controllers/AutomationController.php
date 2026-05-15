@@ -16,7 +16,20 @@ class AutomationController extends Controller
     {
         $automations = Automation::with('domain')->latest()->get();
         $domains = Domain::orderBy('name')->get();
-        return view('automations.index', compact('automations', 'domains'))
+        
+        $schedulerLastRun = \App\Models\Setting::where('key', 'scheduler_last_run')->value('value');
+        
+        // Find last automation cleanup run
+        $lastCleanup = \App\Models\AutomationLog::where('message', 'like', '%Automated cleanup%')
+            ->latest()
+            ->first();
+
+        // Find last certificate archive run
+        $lastArchive = \App\Models\AuditLog::where('action', 'cert_archive')
+            ->latest()
+            ->first();
+
+        return view('automations.index', compact('automations', 'domains', 'schedulerLastRun', 'lastCleanup', 'lastArchive'))
             ->with('containerClass', 'container-fluid');
     }
 
