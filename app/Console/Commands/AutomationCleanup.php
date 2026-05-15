@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\Automation;
+use App\Models\AuditLog;
 use App\Services\PaloAltoService;
 use App\Services\FortigateService;
 use Illuminate\Console\Command;
@@ -22,11 +23,13 @@ class AutomationCleanup extends Command
 
         if ($automations->isEmpty()) {
             $this->info("No active Palo Alto or Fortigate automations found.");
+            AuditLog::log('automation_cleanup', "Automated cleanup task completed: No active automations found.");
             return 0;
         }
 
         $this->info("Starting Automation cleanup for " . $automations->count() . " automations...");
 
+        $totalDeleted = 0;
         foreach ($automations as $automation) {
             $this->comment("Processing {$automation->type} at {$automation->hostname} for domain {$automation->domain->name}...");
             
@@ -44,6 +47,7 @@ class AutomationCleanup extends Command
                 }
 
                 $this->info("  Deleted {$deleted} certificate(s).");
+                $totalDeleted += $deleted;
                 
                 if ($deleted > 0) {
                     $automation->logs()->create([
@@ -59,6 +63,10 @@ class AutomationCleanup extends Command
                     'message' => "Automated cleanup failed: " . $e->getMessage(),
                 ]);
             }
+        }
+
+        if (!$dryRun) {
+            AuditLog::log('automation_cleanup', "Automated cleanup task completed. Total deleted: {$totalDeleted}");
         }
 
         $this->info("Cleanup complete.");

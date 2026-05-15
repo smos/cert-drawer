@@ -20,9 +20,15 @@ class AutomationController extends Controller
         $schedulerLastRun = \App\Models\Setting::where('key', 'scheduler_last_run')->value('value');
         
         // Find last automation cleanup run
-        $lastCleanup = \App\Models\AutomationLog::where('message', 'like', '%Automated cleanup%')
+        $lastCleanup = \App\Models\AuditLog::where('action', 'automation_cleanup')
             ->latest()
             ->first();
+            
+        if (!$lastCleanup) {
+            $lastCleanup = \App\Models\AutomationLog::where('message', 'like', '%Automated cleanup%')
+                ->latest()
+                ->first();
+        }
 
         // Find last certificate archive run
         $lastArchive = \App\Models\AuditLog::where('action', 'cert_archive')

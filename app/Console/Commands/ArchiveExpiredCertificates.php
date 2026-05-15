@@ -25,11 +25,13 @@ class ArchiveExpiredCertificates extends Command
 
         if ($expiredCerts->isEmpty()) {
             $this->info("No certificates found to archive.");
+            AuditLog::log('cert_archive', "Archive check completed: No certificates met the threshold of {$threshold} days.");
             return 0;
         }
 
         $this->info("Found " . $expiredCerts->count() . " certificates to archive (expired > {$threshold} days).");
 
+        $archivedCount = 0;
         foreach ($expiredCerts as $cert) {
             $this->comment("Archiving ID {$cert->id} for domain {$cert->domain->name} (Expired: {$cert->expiry_date})");
 
@@ -60,7 +62,12 @@ class ArchiveExpiredCertificates extends Command
                 $this->info("  Deleted certificate.pfx");
             }
 
-            AuditLog::log('cert_archive', "Archived expired certificate ID {$cert->id} for domain {$cert->domain->name}");
+            AuditLog::log('cert_archive_detail', "Archived expired certificate ID {$cert->id} for domain {$cert->domain->name}");
+            $archivedCount++;
+        }
+
+        if (!$dryRun) {
+            AuditLog::log('cert_archive', "Archive task completed. {$archivedCount} certificate(s) archived.");
         }
 
         $this->info("Archiving complete.");
