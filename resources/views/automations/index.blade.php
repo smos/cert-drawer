@@ -171,9 +171,10 @@
                 <!-- Filled by JS -->
             </div>
 
-            <div id="extra-fields"></div>
+            <div id="add-extra-fields"></div>
 
             <div style="text-align:right; margin-top:20px;">
+                <button type="button" class="btn" style="background: #2980b9; color: white;" onclick="testConnectivity('add')">Test Connectivity</button>
                 <button type="button" class="btn" onclick="closeAddModal()">Cancel</button>
                 <button type="submit" class="btn btn-primary">Save Automation</button>
             </div>
@@ -190,7 +191,7 @@
             @method('PUT')
             <div style="margin-bottom:15px">
                 <label>Domain</label><br>
-                <select name="domain_id" id="edit-domain-id" required style="width:100%; padding:8px; border:1px solid #ddd;">
+                <select name="domain_id" id="edit-domain-id" required style="width:100%; padding:8px; border:1px solid #ddd;" onchange="checkExistingCert('edit')">
                     @foreach($domains as $d)
                         <option value="{{ $d->id }}">{{ $d->name }}</option>
                     @endforeach
@@ -198,7 +199,7 @@
             </div>
             <div style="margin-bottom:15px">
                 <label>Manufacturer</label><br>
-                <select name="type" id="edit-type" required style="width:100%; padding:8px; border:1px solid #ddd;" onchange="updateFormFields('edit')">
+                <select name="type" id="edit-type" required style="width:100%; padding:8px; border:1px solid #ddd;" onchange="updateFormFields('edit'); checkExistingCert('edit');">
                     <option value="kemp">Kemp Loadmaster</option>
                     <option value="fortigate">Fortigate Firewall</option>
                     <option value="paloalto">Palo Alto Firewall</option>
@@ -206,16 +207,21 @@
             </div>
             <div style="margin-bottom:15px">
                 <label>Hostname / IP Address</label><br>
-                <input type="text" name="hostname" id="edit-hostname" required style="width:100%; padding:8px; border:1px solid #ddd;">
+                <input type="text" name="hostname" id="edit-hostname" required style="width:100%; padding:8px; border:1px solid #ddd;" onchange="checkExistingCert('edit')">
             </div>
             <div style="margin-bottom:15px">
                 <label id="edit-password-label">API Key / Password (Leave blank to keep current)</label><br>
-                <input type="password" name="password" style="width:100%; padding:8px; border:1px solid #ddd;">
+                <input type="password" name="password" id="edit-password" style="width:100%; padding:8px; border:1px solid #ddd;" onchange="checkExistingCert('edit')">
+            </div>
+
+            <div id="edit-cert-check-warning" style="display:none; background:#fff3cd; color:#856404; padding:10px; border-radius:4px; margin-bottom:15px; border:1px solid #ffeeba; font-size:0.85rem;">
+                <!-- Filled by JS -->
             </div>
 
             <div id="edit-extra-fields"></div>
 
             <div style="text-align:right; margin-top:20px;">
+                <button type="button" class="btn" style="background: #2980b9; color: white;" onclick="testConnectivity('edit')">Test Connectivity</button>
                 <button type="button" class="btn" onclick="closeEditModal()">Cancel</button>
                 <button type="submit" class="btn btn-primary">Update Automation</button>
             </div>
@@ -243,12 +249,12 @@
         document.getElementById('add-modal').style.display = 'none';
     }
 
-    function checkExistingCert() {
-        const domainId = document.getElementById('add-domain-id').value;
-        const type = document.getElementById('add-type').value;
-        const hostname = document.getElementById('add-hostname').value;
-        const password = document.getElementById('add-password').value;
-        const warningBox = document.getElementById('cert-check-warning');
+    function checkExistingCert(mode = 'add') {
+        const domainId = document.getElementById(mode + '-domain-id').value;
+        const type = document.getElementById(mode + '-type').value;
+        const hostname = document.getElementById(mode + '-hostname').value;
+        const password = document.getElementById(mode + '-password').value;
+        const warningBox = document.getElementById(mode === 'add' ? 'cert-check-warning' : 'edit-cert-check-warning');
 
         if (!domainId || !type || !hostname) {
             warningBox.style.display = 'none';
@@ -276,6 +282,41 @@
         })
         .catch(err => {
             warningBox.innerHTML = 'Error checking device status.';
+        });
+    }
+
+    function testConnectivity(mode = 'add') {
+        const type = document.getElementById(mode + '-type').value;
+        const hostname = document.getElementById(mode + '-hostname').value;
+        const password = document.getElementById(mode + '-password').value;
+        const warningBox = document.getElementById(mode === 'add' ? 'cert-check-warning' : 'edit-cert-check-warning');
+
+        if (!type || !hostname || !password) {
+            alert('Please provide type, hostname and API key/password.');
+            return;
+        }
+
+        warningBox.style.display = 'block';
+        warningBox.innerHTML = 'Testing connectivity...';
+
+        fetch('{{ route("automations.test") }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': '{{ csrf_token() }}'
+            },
+            body: JSON.stringify({ type: type, hostname: hostname, password: password })
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                warningBox.innerHTML = '<span style="color:#27ae60">✅ ' + data.message + ' (Found ' + data.count + ' certificates)</span>';
+            } else {
+                warningBox.innerHTML = '<span style="color:#c0392b">❌ ' + data.message + '</span>';
+            }
+        })
+        .catch(err => {
+            warningBox.innerHTML = '<span style="color:#c0392b">❌ Error testing connectivity.</span>';
         });
     }
 
@@ -310,8 +351,8 @@
             pwdLabel.innerText = 'API Key';
             html = `
                 <div style="margin-bottom:15px">
-                    <label>SSL/TLS Service Profile Names (comma separated)</label><br>
-                    <input type="text" name="config[profiles_string]" placeholder="VPN-Profile,Portal-Profile" required style="width:100%; padding:8px; border:1px solid #ddd;">
+                    <label>SSL/TLS Service Profile Names (Optional, comma separated)</label><br>
+                    <input type="text" name="config[profiles_string]" placeholder="VPN-Profile,Portal-Profile" style="width:100%; padding:8px; border:1px solid #ddd;">
                 </div>
             `;
         }

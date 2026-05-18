@@ -144,7 +144,7 @@ class AutomationController extends Controller
                 $chainWarning = "";
                 if ($latestCert) {
                     $details = app(CertificateController::class)->show($latestCert)->getData();
-                    if ($details->chain_incomplete) {
+                    if (isset($details->certificate->chain_incomplete) && $details->certificate->chain_incomplete) {
                         $chainWarning = "<div style='margin-top:10px; color:#856404; background:#fff3cd; padding:8px; border-radius:4px; border:1px solid #ffeeba;'>⚠️ <strong>Warning:</strong> The latest certificate for this domain has an incomplete chain. This may cause issues with device decryption/VPN services.</div>";
                     }
                 }
@@ -173,7 +173,7 @@ class AutomationController extends Controller
                 $chainWarning = "";
                 if ($latestCert) {
                     $details = app(CertificateController::class)->show($latestCert)->getData();
-                    if ($details->chain_incomplete) {
+                    if (isset($details->certificate->chain_incomplete) && $details->certificate->chain_incomplete) {
                         $chainWarning = "<div style='margin-top:10px; color:#856404; background:#fff3cd; padding:8px; border-radius:4px; border:1px solid #ffeeba;'>⚠️ <strong>Warning:</strong> The latest certificate for this domain has an incomplete chain. This may cause issues with device decryption/VPN services.</div>";
                     }
                 }
@@ -202,7 +202,7 @@ class AutomationController extends Controller
                 $chainWarning = "";
                 if ($latestCert) {
                     $details = app(CertificateController::class)->show($latestCert)->getData();
-                    if ($details->chain_incomplete) {
+                    if (isset($details->certificate->chain_incomplete) && $details->certificate->chain_incomplete) {
                         $chainWarning = "<div style='margin-top:10px; color:#856404; background:#fff3cd; padding:8px; border-radius:4px; border:1px solid #ffeeba;'>⚠️ <strong>Warning:</strong> The latest certificate for this domain has an incomplete chain. This may cause issues with device decryption/VPN services.</div>";
                     }
                 }
