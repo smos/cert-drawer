@@ -132,7 +132,7 @@
         color: var(--secondary);
     }
 
-    .day-month {
+    .day-number .day-month {
         font-size: 0.75rem;
         font-weight: 400;
         color: #888;
