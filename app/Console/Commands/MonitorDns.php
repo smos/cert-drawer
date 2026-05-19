@@ -84,12 +84,9 @@ class MonitorDns extends Command
     protected function sendNotification($startTime)
     {
         $recipientsString = Setting::where('key', 'dns_mail_recipients')->value('value');
-        if (empty($recipientsString)) {
-            return;
-        }
+        $webhookUrl = Setting::where('key', 'dns_webhook_url')->value('value');
 
-        $recipients = array_filter(array_map('trim', explode(',', $recipientsString)));
-        if (empty($recipients)) {
+        if (empty($recipientsString) && empty($webhookUrl)) {
             return;
         }
 
@@ -98,7 +95,24 @@ class MonitorDns extends Command
             ->get();
 
         if ($changes->isEmpty()) {
-            $this->info("No DNS changes detected. Skipping notification email.");
+            $this->info("No DNS changes detected. Skipping notifications.");
+            return;
+        }
+
+        // Trigger Webhooks
+        try {
+            $webhookService = new \App\Services\WebhookService();
+            $webhookService->sendDnsAlert($changes);
+        } catch (\Exception $e) {
+            $this->error("Failed to trigger DNS webhooks: " . $e->getMessage());
+        }
+
+        if (empty($recipientsString)) {
+            return;
+        }
+
+        $recipients = array_filter(array_map('trim', explode(',', $recipientsString)));
+        if (empty($recipients)) {
             return;
         }
 

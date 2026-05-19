@@ -91,6 +91,13 @@ class RenewAcmeCertificates extends Command
                     }
                 }
 
+                // Trigger Success Webhook
+                try {
+                    app(\App\Services\WebhookService::class)->sendAcmeRenewalAlert($newCert, 'success');
+                } catch (Exception $we) {
+                    $this->error("  Failed to trigger success webhook: " . $we->getMessage());
+                }
+
                 // 4. Trigger Automations
                 $automations = $cert->domain->automations;
                 foreach ($automations as $automation) {
@@ -122,6 +129,13 @@ class RenewAcmeCertificates extends Command
                         ]);
 
                         AuditLog::log('automation_auto_run_success', "Auto-triggered {$automation->type} deployment for: {$automation->domain->name}");
+
+                        // Trigger Automation Success Webhook
+                        try {
+                            app(\App\Services\WebhookService::class)->sendAutomationAlert($automation, $newCert, 'success', $msg, !empty($warnings) ? ['warnings' => $warnings] : null);
+                        } catch (Exception $we) {
+                            $this->error("  Failed to trigger automation success webhook: " . $we->getMessage());
+                        }
                     } catch (Exception $ae) {
                         $this->error("  Automation failed: " . $ae->getMessage());
                         
@@ -143,6 +157,13 @@ class RenewAcmeCertificates extends Command
                                 $this->error("  Failed to send automation email: " . $me->getMessage());
                             }
                         }
+
+                        // Trigger Automation Failure Webhook
+                        try {
+                            app(\App\Services\WebhookService::class)->sendAutomationAlert($automation, $newCert, 'failure', $ae->getMessage());
+                        } catch (Exception $we) {
+                            $this->error("  Failed to trigger automation failure webhook: " . $we->getMessage());
+                        }
                     }
                 }
 
@@ -157,6 +178,13 @@ class RenewAcmeCertificates extends Command
                     } catch (Exception $me) {
                         $this->error("  Failed to send email alert: " . $me->getMessage());
                     }
+                }
+
+                // Trigger Failure Webhook
+                try {
+                    app(\App\Services\WebhookService::class)->sendAcmeRenewalAlert($cert, 'failure', $e->getMessage());
+                } catch (Exception $we) {
+                    $this->error("  Failed to trigger failure webhook: " . $we->getMessage());
                 }
             }
         }

@@ -41,8 +41,22 @@ class SyncEntraId extends Command
         }
 
         $recipientsString = Setting::where('key', 'entra_mail_recipients')->value('value');
+        $webhookUrl = Setting::where('key', 'entra_webhook_url')->value('value');
+
+        if (empty($recipientsString) && empty($webhookUrl)) {
+            $this->warn("No notification recipients (email or webhook) configured for Entra ID alerts.");
+            return;
+        }
+
+        // Trigger Webhooks
+        try {
+            $webhookService = new \App\Services\WebhookService();
+            $webhookService->sendEntraAlert($expiringItems);
+        } catch (\Exception $e) {
+            $this->error("Failed to trigger Entra ID webhooks: " . $e->getMessage());
+        }
+
         if (empty($recipientsString)) {
-            $this->warn("No email recipients configured for Entra ID alerts.");
             return;
         }
 

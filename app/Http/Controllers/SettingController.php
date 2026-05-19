@@ -43,15 +43,26 @@ class SettingController extends Controller
         // Save settings first
         $this->update($request);
 
-        $url = $request->input('alert_webhook_url');
-        $secret = $request->input('alert_webhook_secret');
+        $type = $request->input('webhook_type', 'cert');
+        
+        $urlKey = "{$type}_webhook_url";
+        $secretKey = "{$type}_webhook_secret";
+
+        // Fallback for 'cert' type to legacy keys
+        if ($type === 'cert' && empty($request->input($urlKey))) {
+            $urlKey = 'alert_webhook_url';
+            $secretKey = 'alert_webhook_secret';
+        }
+
+        $url = $request->input($urlKey);
+        $secret = $request->input($secretKey);
         
         if ($secret === '********') {
-            $secret = Setting::where('key', 'alert_webhook_secret')->value('value');
+            $secret = Setting::where('key', $secretKey)->value('value');
         }
 
         if (empty($url)) {
-            return back()->with('error', 'Please provide a webhook URL.');
+            return back()->with('error', "Please provide a webhook URL for category: {$type}.");
         }
 
         $webhookService = new \App\Services\WebhookService();
@@ -87,7 +98,12 @@ class SettingController extends Controller
     public function update(Request $request)
     {
         foreach ($request->except(['_token']) as $key => $value) {
-            if (in_array($key, ['acme_hmac', 'mail_password', 'poller_api_key', 'alert_webhook_secret', 'entra_client_secret']) && ($value === '********' || empty($value))) {
+            if (in_array($key, [
+                'acme_hmac', 'mail_password', 'poller_api_key', 
+                'alert_webhook_secret', 'cert_webhook_secret', 'dns_webhook_secret', 
+                'entra_webhook_secret', 'automation_webhook_secret', 
+                'entra_client_secret'
+            ]) && ($value === '********' || empty($value))) {
                 if ($value === '********') continue;
                 if (empty($value) && Setting::where('key', $key)->exists()) continue;
             }

@@ -197,18 +197,70 @@
 
     <hr>
     <h3>Webhook Notifications</h3>
-    <div style="margin-bottom:15px">
-        <label>Alert Webhook URL (POST)</label><br>
-        <input type="text" name="alert_webhook_url" value="{{ $settings['alert_webhook_url'] ?? '' }}" placeholder="https://hooks.example.com/certs" style="width:100%; padding:8px; border:1px solid #ddd;">
-        <small style="color: #666;">If set, a JSON POST request will be sent to this URL whenever an expiry alert is triggered.</small>
+    <p style="color: #666; font-size: 0.9rem;">Configure endpoints for automated JSON notifications. If a specific webhook is not set, the legacy "Alert Webhook" (Cert Health) will be used as fallback for certificate alerts.</p>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 20px;">
+        <div>
+            <h4 style="margin-bottom: 10px; color: #333; border-bottom: 1px solid #eee; padding-bottom: 5px;">Cert Health</h4>
+            <div style="margin-bottom:10px">
+                <label>Webhook URL</label><br>
+                <input type="text" name="cert_webhook_url" value="{{ $settings['cert_webhook_url'] ?? $settings['alert_webhook_url'] ?? '' }}" placeholder="https://hooks.example.com/certs" style="width:100%; padding:8px; border:1px solid #ddd;">
+            </div>
+            <div>
+                <label>Secret Key (Optional)</label><br>
+                <input type="password" name="cert_webhook_secret" value="{{ isset($settings['cert_webhook_secret']) || isset($settings['alert_webhook_secret']) ? '********' : '' }}" placeholder="Secret key" style="width:100%; padding:8px; border:1px solid #ddd;">
+            </div>
+        </div>
+
+        <div>
+            <h4 style="margin-bottom: 10px; color: #333; border-bottom: 1px solid #eee; padding-bottom: 5px;">DNS Health</h4>
+            <div style="margin-bottom:10px">
+                <label>Webhook URL</label><br>
+                <input type="text" name="dns_webhook_url" value="{{ $settings['dns_webhook_url'] ?? '' }}" placeholder="https://hooks.example.com/dns" style="width:100%; padding:8px; border:1px solid #ddd;">
+            </div>
+            <div>
+                <label>Secret Key (Optional)</label><br>
+                <input type="password" name="dns_webhook_secret" value="{{ isset($settings['dns_webhook_secret']) ? '********' : '' }}" placeholder="Secret key" style="width:100%; padding:8px; border:1px solid #ddd;">
+            </div>
+        </div>
+
+        <div>
+            <h4 style="margin-bottom: 10px; color: #333; border-bottom: 1px solid #eee; padding-bottom: 5px;">Entra ID</h4>
+            <div style="margin-bottom:10px">
+                <label>Webhook URL</label><br>
+                <input type="text" name="entra_webhook_url" value="{{ $settings['entra_webhook_url'] ?? '' }}" placeholder="https://hooks.example.com/entra" style="width:100%; padding:8px; border:1px solid #ddd;">
+            </div>
+            <div>
+                <label>Secret Key (Optional)</label><br>
+                <input type="password" name="entra_webhook_secret" value="{{ isset($settings['entra_webhook_secret']) ? '********' : '' }}" placeholder="Secret key" style="width:100%; padding:8px; border:1px solid #ddd;">
+            </div>
+        </div>
+
+        <div>
+            <h4 style="margin-bottom: 10px; color: #333; border-bottom: 1px solid #eee; padding-bottom: 5px;">Automation & ACME</h4>
+            <div style="margin-bottom:10px">
+                <label>Webhook URL</label><br>
+                <input type="text" name="automation_webhook_url" value="{{ $settings['automation_webhook_url'] ?? '' }}" placeholder="https://hooks.example.com/automation" style="width:100%; padding:8px; border:1px solid #ddd;">
+            </div>
+            <div>
+                <label>Secret Key (Optional)</label><br>
+                <input type="password" name="automation_webhook_secret" value="{{ isset($settings['automation_webhook_secret']) ? '********' : '' }}" placeholder="Secret key" style="width:100%; padding:8px; border:1px solid #ddd;">
+            </div>
+        </div>
     </div>
-    <div style="margin-bottom:15px">
-        <label>Webhook Secret Key (Optional Signature)</label><br>
-        <input type="password" name="alert_webhook_secret" value="{{ isset($settings['alert_webhook_secret']) ? '********' : '' }}" placeholder="Secret key for signing payload" style="width:100%; padding:8px; border:1px solid #ddd;">
-        <small style="color: #666;">If provided, the request will include an 'X-Hub-Signature-256' header containing the HMAC-SHA256 signature of the payload.</small>
-    </div>
-    <div style="margin-bottom:15px">
-        <button type="button" onclick="sendTestWebhook()" class="btn" style="background: #6c757d; color: white;">Test Webhook</button>
+
+    <div style="margin-bottom:15px; background: #f9f9f9; padding: 15px; border-radius: 4px; border: 1px solid #eee;">
+        <label><strong>Test Webhook Integration</strong></label><br>
+        <div style="display: flex; gap: 10px; margin-top: 10px;">
+            <select id="test_webhook_type" style="padding:8px; border:1px solid #ddd; border-radius: 4px;">
+                <option value="cert">Cert Health</option>
+                <option value="dns">DNS Health</option>
+                <option value="entra">Entra ID</option>
+                <option value="automation">Automation</option>
+            </select>
+            <button type="button" onclick="sendTestWebhook()" class="btn" style="background: #6c757d; color: white;">Send Test Payload</button>
+        </div>
+        <small style="color: #666; display: block; margin-top: 5px;">This will save your settings first and then send a test payload to the selected webhook URL.</small>
     </div>
 
     <hr>
@@ -346,7 +398,20 @@ Write-Host "IMPORTANT: Please grant 'Admin Consent' for the permissions in the A
     }
 
     function sendTestWebhook() {
+        const type = document.getElementById('test_webhook_type').value;
         const form = document.getElementById('settings-form');
+        
+        // Add a hidden input for the type if it doesn't exist
+        let typeInput = document.getElementById('webhook_test_type_input');
+        if (!typeInput) {
+            typeInput = document.createElement('input');
+            typeInput.type = 'hidden';
+            typeInput.name = 'webhook_type';
+            typeInput.id = 'webhook_test_type_input';
+            form.appendChild(typeInput);
+        }
+        typeInput.value = type;
+        
         form.action = "{{ route('settings.test-webhook') }}";
         form.submit();
     }

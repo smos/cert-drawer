@@ -90,7 +90,7 @@ class MonitorCert extends Command
     protected function sendNotification($startTime)
     {
         $recipientsString = Setting::where('key', 'cert_mail_recipients')->value('value');
-        $webhookUrl = Setting::where('key', 'alert_webhook_url')->value('value');
+        $webhookUrl = Setting::where('key', 'cert_webhook_url')->value('value') ?? Setting::where('key', 'alert_webhook_url')->value('value');
 
         if (empty($recipientsString) && empty($webhookUrl)) {
             return;
