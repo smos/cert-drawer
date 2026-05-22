@@ -118,11 +118,12 @@ keyUsage = critical, digitalSignature, cRLSign, keyCertSign
 
     public function ensureCsrPem(string $data): string
     {
-        if (str_contains($data, '-----BEGIN CERTIFICATE REQUEST-----')) {
+        $data = trim($data);
+        if (str_contains($data, '-----BEGIN CERTIFICATE REQUEST-----') || str_contains($data, '-----BEGIN NEW CERTIFICATE REQUEST-----')) {
             return $data;
         }
 
-        // Try to wrap it as PEM
+        // Try to wrap it as PEM if it's not already
         $pem = "-----BEGIN CERTIFICATE REQUEST-----\n" . chunk_split(base64_encode($data), 64) . "-----END CERTIFICATE REQUEST-----\n";
         
         if (@openssl_csr_get_subject($pem)) {
@@ -130,6 +131,24 @@ keyUsage = critical, digitalSignature, cRLSign, keyCertSign
         }
 
         return $data;
+    }
+
+    public function isValidCsr(string $csr): bool
+    {
+        $pem = $this->ensureCsrPem($csr);
+        // Also check if it's potentially double-wrapped or corrupted
+        if (substr_count($pem, '-----BEGIN') > 1) {
+            return false;
+        }
+        return @openssl_csr_get_subject($pem) !== false;
+    }
+
+    public function extractCsrBase64(string $csr): string
+    {
+        // Remove any headers/footers (standard or NEW) and whitespace
+        $clean = preg_replace('/-----BEGIN (?:NEW )?CERTIFICATE REQUEST-----/', '', $csr);
+        $clean = preg_replace('/-----END (?:NEW )?CERTIFICATE REQUEST-----/', '', $clean);
+        return trim(str_replace(["\n", "\r", " "], '', $clean));
     }
 
     public function signCsr(string $csrPem, string $issuerCertPem, string $issuerKeyPem, int $days = 365, bool $isCa = false, array $altNames = [])

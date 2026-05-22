@@ -26,6 +26,14 @@ class AcmeService
         $hmac = $settings['acme_hmac'] ?? '';
         
         $certService = app(CertificateService::class);
+        
+        // Validate CSR
+        if (!$certService->isValidCsr($certificate->csr)) {
+            $msg = "Invalid CSR provided for domain: " . $certificate->domain->name;
+            AuditLog::log('acme_error', $msg, ['csr' => substr($certificate->csr, 0, 100) . '...']);
+            throw new Exception($msg . ". Please ensure the CSR has valid headers and content.");
+        }
+
         $info = $certService->getCertInfoFromCsr($certificate->csr);
         $commonName = $info['commonName'] ?? $certificate->domain->name;
 
@@ -97,8 +105,8 @@ class AcmeService
             }
 
             // 6. Finalize
-            $csrRaw = trim(str_replace(['-----BEGIN CERTIFICATE REQUEST-----', '-----END CERTIFICATE REQUEST-----', "\n", "\r"], '', $certificate->csr));
-            $this->request('POST', $order['finalize'], ['csr' => $this->base64UrlEncode(base64_decode($csrRaw))]);
+            $base64Csr = $certService->extractCsrBase64($certificate->csr);
+            $this->request('POST', $order['finalize'], ['csr' => $this->base64UrlEncode(base64_decode($base64Csr))]);
             
             // 7. Poll for success
             $order = $this->pollStatus($orderUrl, 'valid');
@@ -111,7 +119,10 @@ class AcmeService
 
         } catch (Exception $e) {
             Log::error("ACME native fulfillment failed: " . $e->getMessage());
-            AuditLog::log('acme_error', "ACME fulfillment failed for {$commonName}: " . $e->getMessage());
+            AuditLog::log('acme_error', "ACME fulfillment failed for {$commonName}: " . $e->getMessage(), [
+                'error' => $e->getMessage(),
+                'last_response' => $this->lastResponse
+            ]);
             throw $e;
         }
     }
@@ -318,6 +329,7 @@ class AcmeService
 
         $response = curl_exec($ch);
         $headerSize = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $header = substr($response, 0, $headerSize);
         $body = substr($response, $headerSize);
         curl_close($ch);
@@ -326,6 +338,12 @@ class AcmeService
         if (preg_match('/Location: (.*)/i', $header, $matches)) $this->lastLocation = trim($matches[1]);
 
         $this->lastResponse = json_decode($body, true) ?: $body;
+
+        if ($httpCode >= 400) {
+            $errorDetail = is_array($this->lastResponse) ? json_encode($this->lastResponse) : $this->lastResponse;
+            throw new Exception("ACME Server returned error {$httpCode}: {$errorDetail}");
+        }
+
         return $this->lastResponse;
     }
 

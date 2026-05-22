@@ -294,7 +294,10 @@
         <h3>Processing ACME Request</h3>
         <div id="acme-spinner" style="margin: 20px auto; border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 2s linear infinite;"></div>
         <p id="acme-status">Starting verification...</p>
-        <p style="font-size: 0.8rem; color: #888;">This can take up to 5 minutes. Please do not close this window.</p>
+        <p id="acme-subtext" style="font-size: 0.8rem; color: #888;">This can take up to 5 minutes. Please do not close this window.</p>
+        <div id="acme-error-actions" style="display:none; margin-top: 20px;">
+             <button class="btn" onclick="document.getElementById('acme-processing-modal').style.display='none'; if(!drawer.classList.contains('open')) overlay.classList.remove('active');">Close</button>
+        </div>
     </div>
 
     <style>
@@ -1016,10 +1019,19 @@
             console.log('fulfillAcme triggered for ID:', certificateId);
             const modal = document.getElementById('acme-processing-modal');
             const statusText = document.getElementById('acme-status');
+            const spinner = document.getElementById('acme-spinner');
+            const subtext = document.getElementById('acme-subtext');
+            const errorActions = document.getElementById('acme-error-actions');
             
             modal.style.display = 'block';
             overlay.classList.add('active');
+
+            // Reset modal state
             statusText.innerText = 'Initializing ACME verification...';
+            statusText.style.color = 'inherit';
+            spinner.style.display = 'block';
+            subtext.style.display = 'block';
+            errorActions.style.display = 'none';
 
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
@@ -1035,20 +1047,25 @@
             .then(res => res.json())
             .then(data => {
                 clearTimeout(timeoutId);
-                modal.style.display = 'none';
                 if (data.success) {
+                    modal.style.display = 'none';
                     alert('Success! Certificate has been issued via ACME service.');
                     openDrawer(domainId);
                 } else {
-                    alert('ACME Error: ' + data.message);
-                    if (!drawer.classList.contains('open')) overlay.classList.remove('active');
+                    spinner.style.display = 'none';
+                    subtext.style.display = 'none';
+                    errorActions.style.display = 'block';
+                    statusText.innerText = 'ACME Error: ' + data.message;
+                    statusText.style.color = 'red';
                 }
             })
             .catch(err => {
                 clearTimeout(timeoutId);
-                modal.style.display = 'none';
-                alert('An error occurred: ' + err.message);
-                if (!drawer.classList.contains('open')) overlay.classList.remove('active');
+                spinner.style.display = 'none';
+                subtext.style.display = 'none';
+                errorActions.style.display = 'block';
+                statusText.innerText = 'An error occurred: ' + err.message;
+                statusText.style.color = 'red';
             });
         }
 
