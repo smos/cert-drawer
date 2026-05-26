@@ -84,4 +84,34 @@ class CertificateServiceTest extends TestCase
         $der = base64_decode($base64);
         $this->assertNotFalse($der);
     }
+
+    public function test_clean_csr_with_messy_input()
+    {
+        $dn = ['commonName' => 'test.local'];
+        $res = $this->certService->generateCsr($dn);
+        $validBase64 = $this->certService->extractCsrBase64($res['csr']);
+        
+        $messy = "Junk at top\n-----BEGIN CERTIFICATE REQUEST-----\n-----BEGIN NEW CERTIFICATE REQUEST-----\n" . 
+                 $validBase64 . "\n-----END NEW CERTIFICATE REQUEST-----\n-----END CERTIFICATE REQUEST-----\nJunk at bottom";
+        
+        $cleaned = $this->certService->cleanCsr($messy);
+        
+        $this->assertStringStartsWith('-----BEGIN CERTIFICATE REQUEST-----', $cleaned);
+        $this->assertStringEndsWith('-----END CERTIFICATE REQUEST-----', $cleaned);
+        $this->assertStringNotContainsString('Junk at top', $cleaned);
+        $this->assertStringNotContainsString('NEW CERTIFICATE REQUEST', $cleaned);
+        $this->assertTrue($this->certService->isValidCsr($cleaned));
+    }
+
+    public function test_extract_csr_base64_with_messy_input()
+    {
+        $dn = ['commonName' => 'test.local'];
+        $res = $this->certService->generateCsr($dn);
+        $validBase64 = $this->certService->extractCsrBase64($res['csr']);
+        
+        $messy = "Junk\n-----BEGIN CERTIFICATE REQUEST-----\n" . $validBase64 . "\n-----END CERTIFICATE REQUEST-----\nMore Junk";
+        
+        $extracted = $this->certService->extractCsrBase64($messy);
+        $this->assertEquals($validBase64, $extracted);
+    }
 }

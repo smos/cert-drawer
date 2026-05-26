@@ -143,12 +143,38 @@ keyUsage = critical, digitalSignature, cRLSign, keyCertSign
         return @openssl_csr_get_subject($pem) !== false;
     }
 
+    public function cleanCsr(string $csr): string
+    {
+        // Try to find content between the first BEGIN and last END
+        if (preg_match('/-----BEGIN [^-]+-----(.*?)-----END [^-]+-----/s', $csr, $matches)) {
+            $content = trim($matches[1]);
+            // Strip any nested headers that might be inside
+            $content = preg_replace('/-----BEGIN [^-]+-----/', '', $content);
+            $content = preg_replace('/-----END [^-]+-----/', '', $content);
+            $content = trim($content);
+            
+            // Re-wrap in a clean standard header
+            return "-----BEGIN CERTIFICATE REQUEST-----\n" . $content . "\n-----END CERTIFICATE REQUEST-----";
+        }
+        
+        return $this->ensureCsrPem($csr);
+    }
+
     public function extractCsrBase64(string $csr): string
     {
-        // Remove any headers/footers (standard or NEW) and whitespace
+        // Extract content between any BEGIN/END headers, ignoring junk outside
+        if (preg_match('/-----BEGIN [^-]+-----(.*?)-----END [^-]+-----/s', $csr, $matches)) {
+            $content = $matches[1];
+            // Also strip any nested headers (like double-header case)
+            $content = preg_replace('/-----BEGIN [^-]+-----/', '', $content);
+            $content = preg_replace('/-----END [^-]+-----/', '', $content);
+            return trim(str_replace(["\n", "\r", " ", "\t"], '', $content));
+        }
+
+        // Fallback for cases without headers (if any)
         $clean = preg_replace('/-----BEGIN (?:NEW )?CERTIFICATE REQUEST-----/', '', $csr);
         $clean = preg_replace('/-----END (?:NEW )?CERTIFICATE REQUEST-----/', '', $clean);
-        return trim(str_replace(["\n", "\r", " "], '', $clean));
+        return trim(str_replace(["\n", "\r", " ", "\t"], '', $clean));
     }
 
     public function signCsr(string $csrPem, string $issuerCertPem, string $issuerKeyPem, int $days = 365, bool $isCa = false, array $altNames = [])

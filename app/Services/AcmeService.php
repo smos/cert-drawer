@@ -17,6 +17,7 @@ class AcmeService
     protected ?string $nonce = null;
     protected ?string $accountUrl = null;
     protected ?string $lastLocation = null;
+    protected string $directoryUrl = '';
     protected $lastResponse;
 
     public function issueCertificate(Certificate $certificate)
@@ -24,6 +25,7 @@ class AcmeService
         $settings = Setting::all()->pluck('value', 'key');
         $kid = $settings['acme_kid'] ?? '';
         $hmac = $settings['acme_hmac'] ?? '';
+        $email = $settings['admin_email'] ?? 'admin@domain.local';
         
         $certService = app(CertificateService::class);
         
@@ -58,6 +60,8 @@ class AcmeService
             throw new Exception("ACME Directory URL not configured for this request type.");
         }
 
+        $this->directoryUrl = $directoryUrl;
+
         Log::info("Starting native ACME fulfillment for {$commonName} using {$directoryUrl}");
 
         try {
@@ -68,7 +72,7 @@ class AcmeService
             $this->accountKey = $this->getAccountKey();
 
             // 3. Register/Get Account
-            $this->newAccount($directory['newAccount'], $kid, $hmac);
+            $this->newAccount($directory['newAccount'], $kid, $hmac, $email);
 
             // 4. Create Order
             $order = $this->newOrder($directory['newOrder'], $allDomains);
@@ -174,12 +178,17 @@ class AcmeService
         return $key;
     }
 
-    protected function newAccount(string $url, string $kid = '', string $hmac = '')
+    protected function newAccount(string $url, string $kid = '', string $hmac = '', string $email = '')
     {
-        $payload = ['termsOfServiceAgreed' => true, 'contact' => []];
+        $payload = [
+            'termsOfServiceAgreed' => true,
+            'contact' => $email ? ["mailto:{$email}"] : []
+        ];
+
         if ($kid && $hmac) {
             $payload['externalAccountBinding'] = $this->generateEab($url, $kid, $hmac);
         }
+
         $this->request('POST', $url, $payload);
         $this->accountUrl = $this->lastLocation;
     }
@@ -254,18 +263,21 @@ class AcmeService
             'n' => $this->base64UrlEncode($details['rsa']['n']),
         ];
 
-        $protected = $this->base64UrlEncode(json_encode([
+        $protected = [
             'alg' => 'HS256',
             'kid' => $kid,
             'url' => $url,
-        ]));
+        ];
 
-        $payload = $this->base64UrlEncode(json_encode($jwk));
-        $signature = hash_hmac('sha256', "{$protected}.{$payload}", base64_decode(str_replace(['-', '_'], ['+', '/'], $hmac)), true);
+        $payload = json_encode($jwk);
+        $protectedStr = $this->base64UrlEncode(json_encode($protected));
+        $payloadStr = $this->base64UrlEncode($payload);
+        
+        $signature = hash_hmac('sha256', "{$protectedStr}.{$payloadStr}", base64_decode($this->base64UrlFix($hmac)), true);
 
         return [
-            'protected' => $protected,
-            'payload' => $payload,
+            'protected' => $protectedStr,
+            'payload' => $payloadStr,
             'signature' => $this->base64UrlEncode($signature)
         ];
     }
@@ -280,11 +292,15 @@ class AcmeService
         if ($method === 'GET') return $this->curl($url);
 
         if (!$this->nonce) {
-            $directory = $this->request('GET', $this->lastLocation ?: $url); // Just to get a nonce
-            $this->curl($directory['newNonce'] ?? $url, null, 'HEAD');
+            $directory = $this->request('GET', $this->directoryUrl);
+            $this->curl($directory['newNonce'], null, 'HEAD');
         }
 
-        $protected = ['alg' => 'RS256', 'nonce' => $this->nonce, 'url' => $url];
+        $protected = [
+            'alg' => 'RS256',
+            'nonce' => $this->nonce,
+            'url' => $url
+        ];
 
         if ($this->accountUrl) {
             $protected['kid'] = $this->accountUrl;

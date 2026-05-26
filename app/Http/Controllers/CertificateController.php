@@ -136,7 +136,7 @@ class CertificateController extends Controller
                 if (!$this->certService->isValidCsr($validated['csr'])) {
                     throw new \Exception("The uploaded CSR is invalid or improperly formatted.");
                 }
-                $csr = $this->certService->ensureCsrPem($validated['csr']);
+                $csr = $this->certService->cleanCsr($validated['csr']);
             } else { // auto
                 $dn = [
                     "countryName" => $settings['dn_country'] ?? "NL",
