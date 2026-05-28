@@ -522,4 +522,19 @@ class CertificateController extends Controller
                     ->header('Content-Disposition', 'attachment; filename="' . $certificate->domain->name . '.key"');
         }
     }
+
+    public function switchToManual(Certificate $certificate)
+    {
+        $this->authorizeAccess($certificate->domain);
+
+        if ($certificate->request_type !== 'acme') {
+            return response()->json(['success' => false, 'message' => 'Only ACME certificates can be switched to manual.'], 400);
+        }
+
+        $certificate->update(['request_type' => 'manual']);
+        
+        AuditLog::log('cert_type_change', "Switched certificate from ACME to Manual for domain: {$certificate->domain->name}", ['cert_id' => $certificate->id]);
+
+        return response()->json(['success' => true, 'message' => 'Certificate switched to Manual. Auto-renewal is now disabled.']);
+    }
 }

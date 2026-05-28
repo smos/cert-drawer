@@ -41,6 +41,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/certificates/{certificate}/adcs-request', [CertificateController::class, 'requestAdcs'])->name('certificates.adcs-request');
     Route::post('/certificates/{certificate}/acme-request', [CertificateController::class, 'requestAcme'])->name('certificates.acme-request');
     Route::post('/certificates/{certificate}/acme-fulfill', [CertificateController::class, 'fulfillAcme'])->name('certificates.acme-fulfill');
+    Route::post('/certificates/{certificate}/switch-to-manual', [CertificateController::class, 'switchToManual'])->name('certificates.switch-to-manual');
 
     Route::match(['get', 'post'], '/certificates/{certificate}/download/{type}', [CertificateController::class, 'download'])->name('certificates.download');
     Route::match(['get', 'post'], '/certificates/{certificate}/pfx', [CertificateController::class, 'generatePfx'])->name('certificates.pfx');

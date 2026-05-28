@@ -554,6 +554,9 @@
                                     ${c.status === 'pending_verification' ? `
                                         <button class="btn btn-sm" style="background:#27ae60; color:white;" onclick="fulfillAcme(${c.id}, ${domain.id})">Verify & Fulfill ACME</button>
                                     ` : ''}
+                                    ${c.status === 'issued' && c.request_type === 'acme' ? `
+                                        <button class="btn btn-sm" style="background: #6c757d; color: white;" onclick="switchToManual(${c.id}, ${domain.id})" title="Disable ACME auto-renewal for this certificate">Disable Auto-Renewal</button>
+                                    ` : ''}
                                     ${c.certificate ? `
                                         <a href="/certificates/${c.id}/download/cert" class="btn btn-sm">Download Cert</a>
                                         <a href="/certificates/${c.id}/download/chain" class="btn btn-sm" style="background: #27ae60; color: white;">Download Chain</a>
@@ -1154,6 +1157,32 @@
                     openDrawer(domainId);
                 });
             }
+        }
+
+        function switchToManual(certId, domainId) {
+            if (!confirm('Are you sure you want to disable ACME auto-renewal for this certificate? This will switch the request type to "Manual". Monitoring will still continue, but no new ACME orders will be triggered automatically.')) {
+                return;
+            }
+
+            fetch(`/certificates/${certId}/switch-to-manual`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                }
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    alert(data.message);
+                    openDrawer(domainId);
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            })
+            .catch(err => {
+                alert('Error switching to manual: ' + err.message);
+            });
         }
 
         function fixChain(certId, domainId) {
