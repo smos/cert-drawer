@@ -285,12 +285,18 @@ class CertificateController extends Controller
         if ($certificate->certificate) {
             $info = $this->certService->getCertInfo($certificate->certificate);
             $details['type'] = 'Certificate';
-            $details['common_name'] = $info['subject']['CN'] ?? $certificate->domain->name;
-            $details['serial_number'] = $info['serialNumber'] ?? 'Unknown';
-            $details['signature_type'] = $info['signatureTypeSN'] ?? 'Unknown';
-            $details['valid_from'] = isset($info['validFrom_time_t']) ? date('Y-m-d H:i:s', $info['validFrom_time_t']) : 'Unknown';
-            $details['sans'] = $this->certService->extractSansFromCert($info);
-            $details['full_subject'] = json_encode($info['subject'] ?? []);
+            if ($info) {
+                $details['common_name'] = $info['subject']['CN'] ?? $certificate->domain->name;
+                $details['serial_number'] = $info['serialNumber'] ?? 'Unknown';
+                $details['signature_type'] = $info['signatureTypeSN'] ?? 'Unknown';
+                $details['valid_from'] = isset($info['validFrom_time_t']) ? date('Y-m-d H:i:s', $info['validFrom_time_t']) : 'Unknown';
+                $details['sans'] = $this->certService->extractSansFromCert($info);
+                $details['full_subject'] = json_encode($info['subject'] ?? []);
+            } else {
+                $details['common_name'] = $certificate->domain->name;
+                $details['serial_number'] = 'Invalid/Unparseable';
+                $details['sans'] = [];
+            }
 
             // Check chain completeness (simplified for details view)
             if (!$certificate->is_ca) {

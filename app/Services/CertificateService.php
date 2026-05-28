@@ -251,8 +251,11 @@ subjectAltName = @alt_names
         ];
     }
 
-    public function extractSansFromCert(array $info)
+    public function extractSansFromCert($info)
     {
+        if (!is_array($info)) {
+            return [];
+        }
         $sans = [];
         if (isset($info['extensions']['subjectAltName'])) {
             $parts = explode(',', $info['extensions']['subjectAltName']);

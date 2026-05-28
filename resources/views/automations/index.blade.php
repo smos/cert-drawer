@@ -110,7 +110,7 @@
                     </td>
                     <td style="padding: 12px 15px; text-align: right;">
                         <div style="display: flex; gap: 5px; justify-content: flex-end;">
-                            <button type="button" class="btn btn-sm" style="background: #2980b9; color: white;" onclick="runDryRun({{ $auto->id }})">Test</button>
+                            <button type="button" class="btn btn-sm" style="background: #2980b9; color: white;" onclick="runDryRun(this, {{ $auto->id }})">Test</button>
                             <form action="{{ route('automations.run', $auto->id) }}" method="POST">
                                 @csrf
                                 <button type="submit" class="btn btn-sm btn-primary" onclick="return confirm('Upload and REPLACE certificate on device now?')">Run Now</button>
@@ -268,6 +268,7 @@
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                'Accept': 'application/json',
                 'X-CSRF-TOKEN': '{{ csrf_token() }}'
             },
             body: JSON.stringify({ domain_id: domainId, type: type, hostname: hostname, password: password })
@@ -303,6 +304,7 @@
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                'Accept': 'application/json',
                 'X-CSRF-TOKEN': '{{ csrf_token() }}'
             },
             body: JSON.stringify({ type: type, hostname: hostname, password: password })
@@ -360,7 +362,11 @@
     }
 
     function openEditModal(id) {
-        fetch(`/automations/${id}`)
+        fetch(`/automations/${id}`, {
+            headers: {
+                'Accept': 'application/json'
+            }
+        })
             .then(res => res.json())
             .then(data => {
                 const auto = data.automation;
@@ -391,7 +397,11 @@
     }
 
     function openLogsModal(id) {
-        fetch(`/automations/${id}`)
+        fetch(`/automations/${id}`, {
+            headers: {
+                'Accept': 'application/json'
+            }
+        })
             .then(res => res.json())
             .then(data => {
                 const logs = data.logs;
@@ -422,14 +432,33 @@
         document.getElementById('logs-modal').style.display = 'none';
     }
 
-    function runDryRun(id) {
-        const btn = event.target;
+    function runDryRun(btn, id) {
         const originalText = btn.innerText;
         btn.innerText = 'Testing...';
         btn.disabled = true;
 
-        fetch(`/automations/${id}/test`)
-            .then(res => res.json())
+        fetch(`/automations/${id}/test`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'X-CSRF-TOKEN': '{{ csrf_token() }}'
+            }
+        })
+            .then(res => {
+                return res.text().then(text => {
+                    try {
+                        return JSON.parse(text);
+                    } catch (e) {
+                        console.error('Non-JSON response:', text);
+                        // Show first 100 chars of response if it's HTML
+                        const errorMsg = text.includes('<!DOCTYPE') || text.includes('<html') 
+                            ? 'Server returned HTML instead of JSON. This might be a session timeout or a server error.'
+                            : 'Invalid JSON response.';
+                        throw new Error(errorMsg);
+                    }
+                });
+            })
             .then(data => {
                 if (data.success) {
                     alert('Dry-run check successful!\n' + JSON.stringify(data.status, null, 2));
@@ -437,7 +466,9 @@
                     alert('Check failed: ' + data.message);
                 }
             })
-            .catch(err => alert('Error: ' + err.message))
+            .catch(err => {
+                alert('Error: ' + err.message);
+            })
             .finally(() => {
                 btn.innerText = originalText;
                 btn.disabled = false;

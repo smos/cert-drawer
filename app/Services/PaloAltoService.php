@@ -582,7 +582,7 @@ class PaloAltoService
         if ($existing) {
             $deviceCert = $this->getCert($automation, $certName);
             $status['details']['device_cert'] = [
-                'name' => $existing['name'],
+                'name' => $existing['name'] ?? $certName,
                 'serial' => $deviceCert['serial'] ?? 'unknown',
                 'thumbprint' => $deviceCert['thumbprint'] ?? 'unknown',
                 'expiry' => $deviceCert['expiry'] ?? 'unknown',

@@ -28,6 +28,13 @@ class AdminMiddleware
             }
         }
 
+        if ($request->expectsJson()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized access. You do not have permission to access this area or your session has expired.'
+            ], 403);
+        }
+
         abort(403, 'Unauthorized access. You do not have permission to access this area.');
     }
 }

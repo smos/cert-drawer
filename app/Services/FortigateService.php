@@ -303,10 +303,9 @@ class FortigateService
         if ($existing) {
             $deviceCert = $this->getCert($automation, $certName);
             $status['details']['device_cert'] = [
-                'name' => $existing['name'],
+                'name' => $existing['name'] ?? $certName,
                 'serial' => $deviceCert['serial'] ?? 'unknown',
                 'expiry' => $deviceCert['valid_to'] ?? 'unknown',
-                // Fortigate API returns some of these directly in the object
             ];
             $status['details']['local_cert'] = [
                 'serial' => $certificate->serial_number,
@@ -317,8 +316,8 @@ class FortigateService
             // If we have serials, we can compare them for extra certainty
             if (isset($deviceCert['serial']) && $certificate->serial_number) {
                  // Simple cleanup of serial comparison
-                 $devSerial = strtolower(str_replace(' ', '', $deviceCert['serial']));
-                 $locSerial = strtolower(str_replace(' ', '', $certificate->serial_number));
+                 $devSerial = strtolower(str_replace(' ', '', (string)$deviceCert['serial']));
+                 $locSerial = strtolower(str_replace(' ', '', (string)$certificate->serial_number));
                  if ($devSerial !== $locSerial) {
                      $status['needs_update'] = true;
                      $status['message'] = "Certificate '{$certName}' version mismatch (Serial: {$deviceCert['serial']} vs {$certificate->serial_number}).";

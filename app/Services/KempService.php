@@ -108,15 +108,15 @@ class KempService
             $existingInfo = $certService->getCertInfo($existing);
             $localInfo = $certService->getCertInfo($certificate->certificate);
 
-            $existingSerial = $existingInfo['serialNumber'] ?? 'unknown';
-            $localSerial = $localInfo['serialNumber'] ?? 'unknown';
+            $existingSerial = $existingInfo ? ($existingInfo['serialNumber'] ?? 'unknown') : 'unparseable';
+            $localSerial = $localInfo ? ($localInfo['serialNumber'] ?? 'unknown') : 'unparseable';
             $existingThumb = $certService->extractThumbprint($existing, 'sha256');
             $localThumb = $certificate->thumbprint_sha256;
 
             $status['details']['device_cert'] = [
                 'serial' => $existingSerial,
                 'thumbprint' => $existingThumb,
-                'expiry' => isset($existingInfo['validTo_time_t']) ? date('Y-m-d H:i:s', $existingInfo['validTo_time_t']) : 'unknown',
+                'expiry' => ($existingInfo && isset($existingInfo['validTo_time_t'])) ? date('Y-m-d H:i:s', $existingInfo['validTo_time_t']) : 'unknown',
             ];
             
             $status['details']['local_cert'] = [

@@ -128,9 +128,14 @@
 
     <hr>
     <h3>Entra ID Integration (Enterprise Apps & App Registrations)</h3>
-    <div style="margin-bottom: 20px;">
-        <button type="button" onclick="showEntraAssistant()" class="btn btn-primary" style="background: #0078d4;">🚀 PowerShell Setup Assistant</button>
-        <p style="font-size: 0.85rem; color: #666; margin-top: 5px;">Use our assistant to automatically create the App Registration and permissions in your tenant.</p>
+    <div style="margin-bottom: 20px; background: #f0f7ff; padding: 15px; border-left: 4px solid #0078d4; border-radius: 4px;">
+        <h4 style="margin-top: 0; color: #0078d4;">Manual Setup Required</h4>
+        <ol style="font-size: 0.9rem; margin-bottom: 0;">
+            <li>Create an <strong>App Registration</strong> in the Entra ID portal.</li>
+            <li>Add <strong>Microsoft Graph (Application)</strong> permissions: <code>Application.Read.All</code> and <code>ServicePrincipal.Read.All</code>.</li>
+            <li>Grant <strong>Admin Consent</strong> for these permissions.</li>
+            <li>Create a <strong>Client Secret</strong> and paste the values below.</li>
+        </ol>
     </div>
     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
         <div style="grid-column: span 2;">
@@ -144,6 +149,11 @@
         <div>
             <label>Entra Client Secret</label><br>
             <input type="password" name="entra_client_secret" id="entra_client_secret" value="{{ isset($settings['entra_client_secret']) ? '********' : '' }}" placeholder="Enter secret" style="width:100%; padding:8px; border:1px solid #ddd;">
+        </div>
+        <div style="grid-column: span 2;">
+            <label>Ignore Expired items (Days since expiry)</label><br>
+            <input type="number" name="entra_ignore_expired_days" value="{{ $settings['entra_ignore_expired_days'] ?? '30' }}" min="0" style="width:100%; padding:8px; border:1px solid #ddd;">
+            <small style="color: #666;">Entra ID secrets/certificates expired longer than this many days will be ignored in alerts. Set to 0 to always alert for expired items without active replacement.</small>
         </div>
         <div style="grid-column: span 2;">
             <small style="color: #666;">Requires Microsoft Graph API permissions: <code>Application.Read.All</code> and <code>ServicePrincipal.Read.All</code>.</small>
@@ -295,102 +305,7 @@
     <button type="submit" class="btn btn-primary" style="margin-top: 20px;">Save General Settings</button>
 </form>
 
-<div id="entra-assistant-modal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:white; padding:30px; box-shadow:0 0 20px rgba(0,0,0,0.5); z-index:1200; border-radius:8px; width:700px; max-height: 90vh; overflow-y: auto;">
-    <h2 style="color: #0078d4; display: flex; align-items: center; gap: 10px;">
-        <span style="font-size: 1.5rem;">🚀</span> Entra ID Setup Assistant
-    </h2>
-    <p>This script will create a new App Registration named <strong>"CertDrawer-Monitor"</strong>, assign the required Microsoft Graph permissions, and generate a client secret.</p>
-    
-    <ol style="font-size: 0.9rem; line-height: 1.6;">
-        <li>Open the <strong><a href="https://shell.azure.com" target="_blank">Azure Cloud Shell</a></strong> (PowerShell).</li>
-        <li>Copy and paste the script below into the shell.</li>
-        <li>After completion, copy the output values back into the settings fields.</li>
-    </ol>
-
-    <div style="background: #2d2d2d; color: #f8f8f2; padding: 15px; border-radius: 4px; font-family: 'Courier New', Courier, monospace; font-size: 0.85rem; position: relative; margin-top: 20px;">
-        <pre id="entra-ps-script" style="white-space: pre-wrap; margin: 0;"></pre>
-        <button onclick="copyPsScript()" style="position: absolute; top: 10px; right: 10px; background: #444; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer;">Copy</button>
-    </div>
-
-    <div style="margin-top: 20px; text-align: right;">
-        <button class="btn" onclick="document.getElementById('entra-assistant-modal').style.display='none'; document.getElementById('overlay').classList.remove('active');">Close</button>
-    </div>
-</div>
-
 <script>
-    function showEntraAssistant() {
-        const appName = "CertDrawer-Monitor";
-        const script = `# Cert Drawer Entra ID Setup Script
-$appName = "${appName}"
-
-# 1. Check and Install/Import Microsoft.Graph module
-if (-not (Get-Module -ListAvailable Microsoft.Graph)) {
-    Write-Host "Microsoft.Graph module not found. Installing..." -ForegroundColor Yellow
-    Install-Module Microsoft.Graph -Scope CurrentUser -Force
-}
-Import-Module Microsoft.Graph
-
-# 2. Ensure Authentication
-try {
-    Get-MgContext -ErrorAction Stop > $null
-} catch {
-    Write-Host "Authentication needed. Connecting to Microsoft Graph..." -ForegroundColor Cyan
-    Connect-MgGraph -Scopes "Application.ReadWrite.All", "Directory.Read.All", "DelegatedPermissionGrant.ReadWrite.All"
-}
-
-Write-Host "Creating App Registration: $appName..." -ForegroundColor Cyan
-
-# 3. Create the Application
-$app = New-MgApplication -DisplayName $appName
-
-# 4. Add Microsoft Graph Permissions (Application.Read.All, ServicePrincipal.Read.All)
-# Graph App ID is always 00000003-0000-0000-c000-000000000000
-$graphAppId = "00000003-0000-0000-c000-000000000000"
-$appReadAll = "b69a0b58-bc4a-4b32-bfde-4f8bc4431464"
-$spReadAll = "06b03af6-6c84-4861-9c6a-49514749f76a"
-
-$params = @{
-    RequiredResourceAccess = @(
-        @{
-            ResourceAppId = $graphAppId
-            ResourceAccess = @(
-                @{ Id = $appReadAll; Type = "Role" }
-                @{ Id = $spReadAll; Type = "Role" }
-            )
-        }
-    )
-}
-Update-MgApplication -ApplicationId $app.Id @params
-
-# 5. Create Service Principal
-$sp = New-MgServicePrincipal -AppId $app.AppId
-
-# 6. Create Client Secret (Valid for 2 years)
-$passwordParams = @{
-    DisplayName = "CertDrawer-Secret"
-    EndDateTime = (Get-Date).AddYears(2)
-}
-$secret = Add-MgApplicationPassword -ApplicationId $app.Id @passwordParams
-
-Write-Host "\`n--- CONFIGURATION VALUES ---" -ForegroundColor Green
-Write-Host "Entra Tenant ID:     $((Get-MgOrganization).Id)"
-Write-Host "Entra Client ID:     $($app.AppId)"
-Write-Host "Entra Client Secret: $($secret.SecretText)"
-Write-Host "----------------------------\`n"
-Write-Host "IMPORTANT: Please grant 'Admin Consent' for the permissions in the Azure Portal under App Registrations > $appName > API Permissions." -ForegroundColor Yellow`;
-
-        document.getElementById('entra-ps-script').innerText = script;
-        document.getElementById('entra-assistant-modal').style.display = 'block';
-        document.getElementById('overlay').classList.add('active');
-    }
-
-    function copyPsScript() {
-        const text = document.getElementById('entra-ps-script').innerText;
-        navigator.clipboard.writeText(text).then(() => {
-            alert('PowerShell script copied to clipboard!');
-        });
-    }
-
     function sendTestEmail() {
         const form = document.getElementById('settings-form');
         form.action = "{{ route('settings.test-email') }}";

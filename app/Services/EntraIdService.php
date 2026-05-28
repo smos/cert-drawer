@@ -225,6 +225,7 @@ class EntraIdService
     public function getExpiringItems($daysThreshold = 30)
     {
         $thresholdDate = now()->addDays($daysThreshold);
+        $ignoreExpiredDays = (int) (Setting::where('key', 'entra_ignore_expired_days')->value('value') ?? 30);
         $now = now();
         
         $allExpiringOrExpired = EntraAppSecret::with('app')
@@ -234,10 +235,15 @@ class EntraIdService
             })
             ->get();
 
-        $filtered = $allExpiringOrExpired->filter(function($item) use ($now) {
+        $filtered = $allExpiringOrExpired->filter(function($item) use ($now, $ignoreExpiredDays) {
             // If it's expiring soon but not yet expired, always include it
             if ($item->end_date > $now) {
                 return true;
+            }
+
+            // If it's already expired, check if it's too old
+            if ($ignoreExpiredDays > 0 && $item->end_date < $now->copy()->subDays($ignoreExpiredDays)) {
+                return false;
             }
 
             // If it's already expired, check if there's an active replacement of the same type
