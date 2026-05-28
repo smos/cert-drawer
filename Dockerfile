@@ -30,6 +30,10 @@ RUN docker-php-ext-configure ldap --with-libdir=lib/x86_64-linux-gnu/ \
 # Enable Apache modules
 RUN a2enmod rewrite
 
+# Build arguments
+ARG BUILD_DATE=unknown
+ENV APP_BUILD_DATE=$BUILD_DATE
+
 # Set working directory
 WORKDIR /var/www/html
 

@@ -15,7 +15,7 @@ services:
       - DB_CONNECTION=sqlite
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      test: ["CMD", "curl", " -s ", " -f ", "http://localhost/health"]
       interval: 30s
       timeout: 10s
       retries: 3

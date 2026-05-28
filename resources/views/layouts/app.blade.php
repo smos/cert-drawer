@@ -216,6 +216,9 @@
                     @csrf
                     <button type="submit" class="btn btn-sm" style="width: 100%; background: #c0392b; color: white;">Logout</button>
                 </form>
+                <div style="font-size: 0.7rem; color: #666; margin-top: 15px; text-align: center;">
+                    Build: {{ config('app.build_date') }}
+                </div>
             </div>
         @else
             <a href="{{ route('login') }}">Login</a>
