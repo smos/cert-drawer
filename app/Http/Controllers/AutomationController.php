@@ -315,7 +315,14 @@ class AutomationController extends Controller
                 'details' => !empty($warnings) ? ['warnings' => $warnings] : null
             ]);
 
-            AuditLog::log('automation_run', "Manually triggered {$automation->type} deployment for: {$automation->domain->name}");
+            AuditLog::log('automation_run', "Manually triggered {$automation->type} deployment for: {$automation->domain->name}", [
+                'automation_id' => $automation->id,
+                'certificate_id' => $latestCert->id,
+                'hostname' => $automation->hostname,
+                'status' => 'success',
+                'warnings' => $warnings
+            ]);
+
             return back()->with('success', 'Deployment successful.');
         } catch (\Exception $e) {
             $errorMessage = $e->getMessage();
@@ -324,6 +331,12 @@ class AutomationController extends Controller
                 'status' => 'failure',
                 'message' => 'Manual deployment failed',
                 'details' => ['error' => $errorMessage, 'trace' => $e->getTraceAsString()]
+            ]);
+
+            AuditLog::log('automation_run_failed', "Manual {$automation->type} deployment failed for: {$automation->domain->name}", [
+                'automation_id' => $automation->id,
+                'certificate_id' => $latestCert->id,
+                'error' => $errorMessage
             ]);
 
             // Send Email
@@ -369,6 +382,11 @@ class AutomationController extends Controller
                 'details' => $status
             ]);
 
+            AuditLog::log('automation_test', "Manual dry-run check completed for: {$automation->domain->name}", [
+                'automation_id' => $automation->id,
+                'status' => $status
+            ]);
+
             return response()->json([
                 'success' => true,
                 'status' => $status
@@ -378,6 +396,11 @@ class AutomationController extends Controller
                 'status' => 'failure',
                 'message' => 'Dry-run check (test) failed',
                 'details' => ['error' => $e->getMessage()]
+            ]);
+
+            AuditLog::log('automation_test_failed', "Dry-run check failed for: {$automation->domain->name}", [
+                'automation_id' => $automation->id,
+                'error' => $e->getMessage()
             ]);
 
             return response()->json([

@@ -52,6 +52,11 @@ class CheckAutomations extends Command
                     $status = app(PaloAltoService::class)->checkStatus($auto, $latestCert);
                 }
 
+                \App\Models\AuditLog::log('automation_check', "Scheduled dry-run check completed for: {$auto->domain->name}", [
+                    'automation_id' => $auto->id,
+                    'status' => $status
+                ]);
+
                 $this->line("  Predicted Device Cert Name: " . ($status['cert_name'] ?? 'N/A'));
                 
                 if ($status['exists_on_device']) {

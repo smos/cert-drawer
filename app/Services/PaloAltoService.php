@@ -247,20 +247,31 @@ class PaloAltoService
         foreach ($profiles as $profileName) {
             if (empty($profileName)) continue;
 
-            // type=config, action=set, xpath=/config/shared/ssl-tls-service-profile/entry[@name='PROFILE']/certificate
+            // Try SHARED first
             $xpath = "/config/shared/ssl-tls-service-profile/entry[@name='{$profileName}']/certificate";
             $url = "https://{$host}/api/?type=config&action=set&xpath=" . urlencode($xpath) . "&element=" . urlencode("<certificate>{$certName}</certificate>");
 
-            $response = Http::withoutVerifying()
-                ->withHeaders(['X-PAN-KEY' => $key])
-                ->post($url);
+            $response = Http::withoutVerifying()->withHeaders(['X-PAN-KEY' => $key])->post($url);
+            
+            // If Shared fails with "Object not present" (code 7), try VSYS1
+            $xml = simplexml_load_string($response->body());
+            if ($xml && (string)$xml['code'] === '7') {
+                 Log::info("Profile {$profileName} not found in Shared. Trying VSYS1...");
+                 $vsysPath = "/config/devices/entry[@name='localhost.localdomain']/vsys/entry[@name='vsys1']/ssl-tls-service-profile/entry[@name='{$profileName}']/certificate";
+                 $vsysUrl = "https://{$host}/api/?type=config&action=set&xpath=" . urlencode($vsysPath) . "&element=" . urlencode("<certificate>{$certName}</certificate>");
+                 $response = Http::withoutVerifying()->withHeaders(['X-PAN-KEY' => $key])->post($vsysUrl);
+            }
 
             if (!$response->successful()) {
-                $errors[] = "{$profileName} (HTTP {$response->status()})";
+                $msg = "{$profileName} (HTTP {$response->status()})";
+                Log::error("Palo Alto Profile Update Failed: {$msg}");
+                $errors[] = $msg;
             } else {
                 $xml = simplexml_load_string($response->body());
                 if (!$xml || (string)$xml['status'] !== 'success') {
-                    $errors[] = "{$profileName} (" . ($xml ? (string)$xml->msg : "XML Error") . ")";
+                    $msg = "{$profileName} (" . ($xml ? (string)$xml->msg : "XML Error") . ")";
+                    Log::error("Palo Alto Profile Update API Error: {$msg}");
+                    $errors[] = $msg;
                 } else {
                     Log::info("Successfully updated Palo Alto Profile {$profileName} to use {$certName}");
                 }
@@ -377,11 +388,15 @@ class PaloAltoService
     {
         $response = Http::withoutVerifying()->withHeaders(['X-PAN-KEY' => $key])->post($url);
         if (!$response->successful()) {
-            $errors[] = "Rule '{$ruleName}' (HTTP {$response->status()})";
+            $msg = "Rule '{$ruleName}' (HTTP {$response->status()})";
+            Log::error("Palo Alto Rule Update Failed: {$msg}");
+            $errors[] = $msg;
         } else {
             $xml = simplexml_load_string($response->body());
             if (!$xml || (string)$xml['status'] !== 'success') {
-                $errors[] = "Rule '{$ruleName}' (" . ($xml ? (string)$xml->msg : "XML Error") . ")";
+                $msg = "Rule '{$ruleName}' (" . ($xml ? (string)$xml->msg : "XML Error") . ")";
+                Log::error("Palo Alto Rule Update API Error: {$msg}");
+                $errors[] = $msg;
             }
         }
     }
@@ -495,16 +510,24 @@ class PaloAltoService
         if (!empty($profilesString)) {
             $profiles = array_filter(array_map('trim', explode(',', $profilesString)));
             foreach ($profiles as $profileName) {
-                // We only clear it if it's currently set to THIS specific expired cert
+                // Try SHARED
                 $xpath = "/config/shared/ssl-tls-service-profile/entry[@name='{$profileName}']/certificate";
                 $urlGet = "https://{$host}/api/?type=config&action=get&xpath=" . urlencode($xpath);
                 $resp = Http::withoutVerifying()->withHeaders(['X-PAN-KEY' => $key])->get($urlGet);
                 
-                if ($resp->successful()) {
+                $xml = simplexml_load_string($resp->body());
+                if (!$resp->successful() || !$xml || (string)$xml['code'] === '7') {
+                    // Try VSYS1
+                    $xpath = "/config/devices/entry[@name='localhost.localdomain']/vsys/entry[@name='vsys1']/ssl-tls-service-profile/entry[@name='{$profileName}']/certificate";
+                    $urlGet = "https://{$host}/api/?type=config&action=get&xpath=" . urlencode($xpath);
+                    $resp = Http::withoutVerifying()->withHeaders(['X-PAN-KEY' => $key])->get($urlGet);
                     $xml = simplexml_load_string($resp->body());
-                    $current = (string)($xml->result->certificate ?? $xml->result->entry->certificate ?? '');
+                }
+
+                if ($resp->successful() && $xml) {
+                    $current = (string)($xml->result->certificate ?? $xml->result->entry->certificate ?? $xml->result->{'ssl-tls-service-profile'}->entry->certificate ?? '');
                     if ($current === $certName) {
-                        Log::info("Unlinking expired cert {$certName} from Profile {$profileName}");
+                        Log::info("Unlinking expired cert {$certName} from Profile {$profileName} at {$xpath}");
                         $urlDel = "https://{$host}/api/?type=config&action=delete&xpath=" . urlencode($xpath);
                         Http::withoutVerifying()->withHeaders(['X-PAN-KEY' => $key])->post($urlDel);
                     }
@@ -608,21 +631,29 @@ class PaloAltoService
         if (!empty($profilesString)) {
             $profiles = array_filter(array_map('trim', explode(',', $profilesString)));
             foreach ($profiles as $p) {
+                // Try SHARED
                 $xpath = "/config/shared/ssl-tls-service-profile/entry[@name='{$p}']/certificate";
                 $url = "https://{$host}/api/?type=config&action=get&xpath=" . urlencode($xpath);
                 $resp = Http::withoutVerifying()->withHeaders(['X-PAN-KEY' => $key])->get($url);
-                $current = 'unknown';
-                if ($resp->successful()) {
+                
+                $xml = simplexml_load_string($resp->body());
+                if (!$resp->successful() || !$xml || (string)$xml['code'] === '7') {
+                    // Try VSYS1
+                    $vsysPath = "/config/devices/entry[@name='localhost.localdomain']/vsys/entry[@name='vsys1']/ssl-tls-service-profile/entry[@name='{$p}']/certificate";
+                    $vsysUrl = "https://{$host}/api/?type=config&action=get&xpath=" . urlencode($vsysPath);
+                    $resp = Http::withoutVerifying()->withHeaders(['X-PAN-KEY' => $key])->get($vsysUrl);
                     $xml = simplexml_load_string($resp->body());
-                    if ($xml && (string)$xml['status'] === 'success') {
-                        // The certificate element can be at different levels depending on API version/response structure
-                        if (isset($xml->result->{'ssl-tls-service-profile'}->entry->certificate)) {
-                            $current = (string)$xml->result->{'ssl-tls-service-profile'}->entry->certificate;
-                        } elseif (isset($xml->result->entry->certificate)) {
-                            $current = (string)$xml->result->entry->certificate;
-                        } elseif (isset($xml->result->certificate)) {
-                            $current = (string)$xml->result->certificate;
-                        }
+                }
+
+                $current = 'unknown';
+                if ($resp->successful() && $xml && (string)$xml['status'] === 'success') {
+                    // The certificate element can be at different levels depending on API version/response structure
+                    if (isset($xml->result->{'ssl-tls-service-profile'}->entry->certificate)) {
+                        $current = (string)$xml->result->{'ssl-tls-service-profile'}->entry->certificate;
+                    } elseif (isset($xml->result->entry->certificate)) {
+                        $current = (string)$xml->result->entry->certificate;
+                    } elseif (isset($xml->result->certificate)) {
+                        $current = (string)$xml->result->certificate;
                     }
                 }
                 $status['details']['profiles'][$p] = [

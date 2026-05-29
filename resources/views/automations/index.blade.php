@@ -231,11 +231,22 @@
 
 <!-- Logs Modal -->
 <div id="logs-modal" class="modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000;">
-    <div style="background:white; width:800px; margin:50px auto; padding:30px; border-radius:8px; max-height:90vh; overflow-y:auto;">
+    <div style="background:white; width:850px; margin:50px auto; padding:30px; border-radius:8px; max-height:90vh; overflow-y:auto;">
         <h3>Automation Logs</h3>
         <div id="logs-content"></div>
         <div style="text-align:right; margin-top:20px;">
             <button type="button" class="btn" onclick="closeLogsModal()">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Test Results Modal -->
+<div id="test-results-modal" class="modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1001;">
+    <div style="background:white; width:800px; margin:50px auto; padding:30px; border-radius:8px; max-height:90vh; overflow-y:auto;">
+        <h3>Dry-run Results</h3>
+        <div id="test-results-content" style="background:#f8f9fa; padding:15px; border-radius:4px; border:1px solid #ddd; font-family:monospace; font-size:0.85rem; white-space:pre-wrap; overflow-x:auto; user-select: text;"></div>
+        <div style="text-align:right; margin-top:20px;">
+            <button type="button" class="btn" onclick="closeTestResultsModal()">Close</button>
         </div>
     </div>
 </div>
@@ -247,6 +258,10 @@
     }
     function closeAddModal() {
         document.getElementById('add-modal').style.display = 'none';
+    }
+
+    function closeTestResultsModal() {
+        document.getElementById('test-results-modal').style.display = 'none';
     }
 
     function checkExistingCert(mode = 'add') {
@@ -406,17 +421,34 @@
             .then(data => {
                 const logs = data.logs;
                 let html = '<table style="width:100%; border-collapse: collapse;">';
-                html += '<tr style="background:#eee;"><th style="padding:10px;">Date</th><th style="padding:10px;">Status</th><th style="padding:10px;">Message</th></tr>';
+                html += '<tr style="background:#eee;"><th style="padding:10px;">Date</th><th style="padding:10px;">Status</th><th style="padding:10px;">Message / Details</th></tr>';
                 
                 logs.forEach(log => {
                     let color = '#27ae60';
                     if (log.status === 'failure' || log.status === 'error') color = '#c0392b';
                     if (log.status === 'warning') color = '#f39c12';
 
+                    let detailsHtml = '';
+                    if (log.details) {
+                        detailsHtml = `<div style="font-size:0.75rem; color:#666; margin-top:5px; background:#f9f9f9; padding:5px; border:1px solid #eee; border-radius:3px;">`;
+                        if (log.details.error) {
+                            detailsHtml += `<strong style="color:#c0392b;">Error:</strong> ${log.details.error}`;
+                        } else if (log.details.warnings) {
+                            detailsHtml += `<strong>Warnings:</strong> ${log.details.warnings.join('; ')}`;
+                        } else {
+                            // Pre-wrap for raw details
+                            detailsHtml += `<div style="white-space:pre-wrap; font-family:monospace;">${JSON.stringify(log.details, null, 2)}</div>`;
+                        }
+                        detailsHtml += `</div>`;
+                    }
+
                     html += `<tr style="border-bottom:1px solid #ddd;">
-                        <td style="padding:10px;">${new Date(log.created_at).toLocaleString()}</td>
+                        <td style="padding:10px; white-space:nowrap;">${new Date(log.created_at).toLocaleString()}</td>
                         <td style="padding:10px;"><span class="tag" style="background:${color}; color:white;">${log.status}</span></td>
-                        <td style="padding:10px;">${log.message}</td>
+                        <td style="padding:10px;">
+                            <strong>${log.message}</strong>
+                            ${detailsHtml}
+                        </td>
                     </tr>`;
                 });
                 
@@ -451,7 +483,6 @@
                         return JSON.parse(text);
                     } catch (e) {
                         console.error('Non-JSON response:', text);
-                        // Show first 100 chars of response if it's HTML
                         const errorMsg = text.includes('<!DOCTYPE') || text.includes('<html') 
                             ? 'Server returned HTML instead of JSON. This might be a session timeout or a server error.'
                             : 'Invalid JSON response.';
@@ -461,7 +492,8 @@
             })
             .then(data => {
                 if (data.success) {
-                    alert('Dry-run check successful!\n' + JSON.stringify(data.status, null, 2));
+                    document.getElementById('test-results-content').innerText = JSON.stringify(data.status, null, 2);
+                    document.getElementById('test-results-modal').style.display = 'block';
                 } else {
                     alert('Check failed: ' + data.message);
                 }
