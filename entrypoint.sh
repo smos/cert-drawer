@@ -1,6 +1,11 @@
 #!/bin/bash
 set -e
 
+echo "--------------------------------------------------------"
+echo " Starting Certificate Drawer"
+echo " Build Date: ${APP_BUILD_DATE:-unknown}"
+echo "--------------------------------------------------------"
+
 # Handle APP_KEY persistence in the same directory as the database
 DB_PATH=${DB_DATABASE:-/var/www/html/database/database.sqlite}
 DB_DIR=$(dirname "$DB_PATH")
