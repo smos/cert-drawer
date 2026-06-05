@@ -132,7 +132,7 @@
         <h4 style="margin-top: 0; color: #0078d4;">Manual Setup Required</h4>
         <ol style="font-size: 0.9rem; margin-bottom: 0;">
             <li>Create an <strong>App Registration</strong> in the Entra ID portal.</li>
-            <li>Add <strong>Microsoft Graph (Application)</strong> permissions: <code>Application.Read.All</code> and <code>ServicePrincipal.Read.All</code>.</li>
+            <li>Add <strong>Microsoft Graph (Application)</strong> permissions: <code>Application.Read.All</code>, <code>ServicePrincipal.Read.All</code> and <code>OnPremisesPublishingProfiles.ReadWrite.All</code> (for App Proxy monitoring).</li>
             <li>Grant <strong>Admin Consent</strong> for these permissions.</li>
             <li>Create a <strong>Client Secret</strong> and paste the values below.</li>
         </ol>
@@ -156,7 +156,7 @@
             <small style="color: #666;">Entra ID secrets/certificates expired longer than this many days will be ignored in alerts. Set to 0 to always alert for expired items without active replacement.</small>
         </div>
         <div style="grid-column: span 2;">
-            <small style="color: #666;">Requires Microsoft Graph API permissions: <code>Application.Read.All</code> and <code>ServicePrincipal.Read.All</code>.</small>
+            <small style="color: #666;">Requires Microsoft Graph API permissions: <code>Application.Read.All</code>, <code>ServicePrincipal.Read.All</code> and <code>OnPremisesPublishingProfiles.ReadWrite.All</code>.</small>
         </div>
     </div>
 

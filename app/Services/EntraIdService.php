@@ -59,6 +59,9 @@ class EntraIdService
         // Sync Enterprise Apps (Service Principals)
         $this->syncEnterpriseApps($token);
 
+        // Sync App Proxy Certificates (Beta endpoint)
+        $this->syncAppProxyCertificates($token);
+
         // Prune apps with no secrets and no notes/tags
         $this->pruneBoringApps();
 
@@ -73,7 +76,7 @@ class EntraIdService
 
     protected function syncAppRegistrations($token)
     {
-        $url = "https://graph.microsoft.com/v1.0/applications";
+        $url = "https://graph.microsoft.com/v1.0/applications?\$select=id,appId,displayName,passwordCredentials,keyCredentials";
         
         while ($url) {
             $response = Http::withToken($token)->get($url);
@@ -103,7 +106,7 @@ class EntraIdService
 
     protected function syncEnterpriseApps($token)
     {
-        $url = "https://graph.microsoft.com/v1.0/servicePrincipals";
+        $url = "https://graph.microsoft.com/v1.0/servicePrincipals?\$select=id,appId,displayName,appOwnerOrganizationId,passwordCredentials,keyCredentials";
         
         while ($url) {
             $response = Http::withToken($token)->get($url);
@@ -112,23 +115,61 @@ class EntraIdService
                 $data = $response->json();
                 foreach ($data['value'] as $appData) {
                     if ($appData['appOwnerOrganizationId'] !== 'f8cdef31-a31e-4b4a-93e4-5f571e91255a') {
-                        $app = EntraApp::updateOrCreate(
-                            ['app_id' => $appData['appId']],
-                            [
+                        $app = EntraApp::where('app_id', $appData['appId'])->first();
+                        
+                        if ($app) {
+                            // Already exists (probably from syncAppRegistrations)
+                            // We keep the App Reg object_id as it is needed for App Proxy/Client Secrets
+                            $app->update([
                                 'display_name' => $appData['displayName'],
-                                'object_id' => $appData['id'], // Overwrite with SP ID as it's often more relevant for SSO
+                                'last_sync' => now(),
+                            ]);
+                        } else {
+                            // New Enterprise App only
+                            $app = EntraApp::create([
+                                'app_id' => $appData['appId'],
+                                'display_name' => $appData['displayName'],
+                                'object_id' => $appData['id'],
                                 'type' => 'enterprise_app',
                                 'last_sync' => now(),
-                            ]
-                        );
+                            ]);
+                        }
 
-                        $this->syncSecrets($app, $appData);
+                        if (!empty($appData['passwordCredentials']) || !empty($appData['keyCredentials'])) {
+                            $this->syncSecrets($app, $appData);
+                        }
                     }
                 }
                 $url = $data['@odata.nextLink'] ?? null;
             } else {
                 Log::error("Failed to sync Enterprise Apps: " . $response->body());
                 $url = null;
+            }
+        }
+    }
+
+    protected function syncAppProxyCertificates($token)
+    {
+        // Microsoft Graph list endpoints often omit onPremisesPublishing content.
+        // We must fetch it individually for each app that we have already discovered.
+        $apps = EntraApp::where('type', 'app_registration')->get();
+        
+        foreach ($apps as $app) {
+            $url = "https://graph.microsoft.com/beta/applications/{$app->object_id}?\$select=onPremisesPublishing";
+            $response = Http::withToken($token)->get($url);
+            
+            if ($response->status() == 403) {
+                Log::warning("EntraIdService: No permission to read onPremisesPublishing for {$app->display_name}. Update Entra ID App permissions.");
+                continue;
+            }
+
+            if ($response->successful()) {
+                $appData = $response->json();
+                if (isset($appData['onPremisesPublishing']['verifiedCustomDomainCertificatesMetadata'])) {
+                    $this->syncSecrets($app, $appData);
+                }
+            } else {
+                Log::error("Failed to sync App Proxy Cert for {$app->display_name}: " . $response->body());
             }
         }
     }
@@ -144,6 +185,12 @@ class EntraIdService
 
     protected function syncSecrets(EntraApp $app, array $data)
     {
+        // BUG FIX: Only sync (and delete) secrets if the data actually contains the fields.
+        // Graph API might omit them if not requested or if certain permissions are missing.
+        if (!array_key_exists('passwordCredentials', $data) && !array_key_exists('keyCredentials', $data) && !isset($data['onPremisesPublishing'])) {
+            return;
+        }
+
         $beforeSecrets = $app->secrets()->pluck('display_name', 'key_id')->toArray();
         $presentKeyIds = [];
 
@@ -194,6 +241,35 @@ class EntraIdService
             }
         }
 
+        // App Proxy Certificates (if provided via syncAppProxyCertificates)
+        if (isset($data['onPremisesPublishing']['verifiedCustomDomainCertificatesMetadata'])) {
+            $certs = $data['onPremisesPublishing']['verifiedCustomDomainCertificatesMetadata'];
+            // If it's a single object (has thumbprint directly), wrap it in an array
+            if (isset($certs['thumbprint'])) {
+                $certs = [$certs];
+            }
+
+            foreach ($certs as $index => $cert) {
+                $thumbprint = $cert['thumbprint'] ?? null;
+                $endDate = isset($cert['expiryDate']) ? now()->parse($cert['expiryDate']) : null;
+                
+                // We use a synthetic key_id for these as they don't have a stable keyId in Graph
+                $keyId = "app_proxy_" . ($thumbprint ?? $index);
+                $presentKeyIds[] = $keyId;
+
+                EntraAppSecret::updateOrCreate(
+                    ['entra_app_id' => $app->id, 'key_id' => $keyId],
+                    [
+                        'display_name' => $cert['subjectName'] ?? "App Proxy Certificate",
+                        'type' => 'app_proxy_certificate',
+                        'thumbprint' => $thumbprint,
+                        'start_date' => isset($cert['issueDate']) ? now()->parse($cert['issueDate']) : null,
+                        'end_date' => $endDate,
+                    ]
+                );
+            }
+        }
+
         $afterSecrets = $app->secrets()->whereIn('key_id', $presentKeyIds)->pluck('display_name', 'key_id')->toArray();
 
         // Detect Remediations (expired secret replaced by a new one)
@@ -217,9 +293,19 @@ class EntraIdService
             AuditLog::log('entra_secret_removed', "Secret/cert removed from app {$app->display_name}: {$name}", [], $app->id);
         }
 
-        // Remediations (if an expired secret was replaced by a new one, we might log that as remediation)
-        // For now, just deleting non-present ones is fine.
-        $app->secrets()->whereNotIn('key_id', $presentKeyIds)->delete();
+        // Delete secrets NOT in the current sync source list
+        // BUT only if we are syncing the correct source for that type.
+        // (App Proxy certs are only in onPremisesPublishing, others are in password/keyCredentials)
+        $query = $app->secrets()->whereNotIn('key_id', $presentKeyIds);
+        
+        if (isset($data['passwordCredentials']) || isset($data['keyCredentials'])) {
+            $query->whereIn('type', ['secret', 'certificate']);
+        }
+        if (isset($data['onPremisesPublishing'])) {
+            $query->where('type', 'app_proxy_certificate');
+        }
+        
+        $query->delete();
     }
 
     public function getExpiringItems($daysThreshold = 30)
@@ -236,9 +322,33 @@ class EntraIdService
             ->get();
 
         $filtered = $allExpiringOrExpired->filter(function($item) use ($now, $ignoreExpiredDays) {
-            // If it's expiring soon but not yet expired, always include it
+            // Check if there's a valid replacement of the same type that is NOT expiring soon
+            // (i.e., its end_date is beyond our yellow threshold)
+            $yellowThreshold = (int) (Setting::where('key', 'expiry_yellow')->value('value') ?? 30);
+            $replacementThreshold = now()->addDays($yellowThreshold);
+
+            $hasValidReplacement = $item->app->secrets()
+                ->where('type', $item->type)
+                ->where('end_date', '>', $replacementThreshold)
+                ->where('id', '!=', $item->id)
+                ->exists();
+
+            // If there's a valid replacement already in place, we don't need to alert on the old one
+            if ($hasValidReplacement) {
+                return false;
+            }
+
+            // If it's expiring soon but not yet expired, include it
             if ($item->end_date > $now) {
-                return true;
+                // If there are multiple expiring ones of same type (unlikely but possible), 
+                // only show the one that expires SOONEST
+                $soonestExpiring = $item->app->secrets()
+                    ->where('type', $item->type)
+                    ->where('end_date', '>', $now)
+                    ->orderBy('end_date', 'asc')
+                    ->first();
+                
+                return $item->id === $soonestExpiring->id;
             }
 
             // If it's already expired, check if it's too old
@@ -246,14 +356,13 @@ class EntraIdService
                 return false;
             }
 
-            // If it's already expired, check if there's an active replacement of the same type
-            $hasActiveReplacement = $item->app->secrets()
+            // If it's already expired, we only want to report it if there is NO active replacement at all
+            $hasAnyActive = $item->app->secrets()
                 ->where('type', $item->type)
                 ->where('end_date', '>', $now)
                 ->exists();
 
-            // If there's an active replacement, ignore this expired one
-            if ($hasActiveReplacement) {
+            if ($hasAnyActive) {
                 return false;
             }
 

@@ -55,33 +55,40 @@ class EntraAppController extends Controller
             $minDays = 9999;
 
             $secretsByType = $app->secrets->groupBy('type');
-            $hasIssue = false;
 
             foreach ($secretsByType as $type => $secrets) {
                 $active = $secrets->filter(fn($s) => $s->end_date && $s->end_date > now());
                 $expired = $secrets->filter(fn($s) => $s->end_date && $s->end_date <= now());
 
-                // If we have expired items but NO active replacement, it's a critical error
-                if ($expired->isNotEmpty() && $active->isEmpty()) {
-                    $healthColor = '#e74c3c';
-                    $healthStatus = 'expired';
-                    $hasIssue = true;
-                    // For expired items with no replacement, the "next expiry" is the one that already passed
-                    $recentExpired = $expired->sortByDesc('end_date')->first();
-                    if (!$nextExpiryDate || $recentExpired->end_date < $nextExpiryDate) {
-                        $nextExpiryDate = $recentExpired->end_date;
+                // Check for "solid" replacement (beyond yellow threshold)
+                $hasSolid = $active->filter(fn($s) => (int) ceil(now()->diffInDays($s->end_date, false)) > $yellow)->isNotEmpty();
+
+                // Update next expiry date (we always want to know the soonest expiry for display)
+                foreach ($secrets as $secret) {
+                    if ($secret->end_date) {
+                        $days = (int) ceil(now()->diffInDays($secret->end_date, false));
+                        if ($days < $minDays) {
+                            $minDays = $days;
+                            $nextExpiryDate = $secret->end_date;
+                        }
                     }
                 }
 
-                // Check health of active items
+                // If we have a solid replacement, this TYPE is considered healthy
+                if ($hasSolid) {
+                    continue;
+                }
+
+                // No solid replacement - Check for issues
+                if ($expired->isNotEmpty() && $active->isEmpty()) {
+                    $healthColor = '#e74c3c';
+                    $healthStatus = 'expired';
+                }
+
+                // Check health of active items (none of which are "solid")
                 foreach ($active as $secret) {
                     $days = (int) ceil(now()->diffInDays($secret->end_date, false));
                     
-                    if ($days < $minDays) {
-                        $minDays = $days;
-                        $nextExpiryDate = $secret->end_date;
-                    }
-
                     // Only update status if we don't already have a more critical (expired) state
                     if ($healthStatus !== 'expired') {
                         if ($days <= $red) {
