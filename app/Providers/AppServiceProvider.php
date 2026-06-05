@@ -27,6 +27,8 @@ class AppServiceProvider extends ServiceProvider
             URL::forceScheme('https');
         }
 
+        \Illuminate\Pagination\Paginator::defaultView('vendor.pagination.custom');
+
         $this->bootLdapConfiguration();
         $this->bootMailConfiguration();
     }
