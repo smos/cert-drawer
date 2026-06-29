@@ -15,6 +15,8 @@ class EntraIdService
     protected $clientId;
     protected $clientSecret;
     protected $accessToken;
+    protected $seenAppIds = [];
+    protected $seenSecrets = [];
 
     public function __construct()
     {
@@ -53,6 +55,9 @@ class EntraIdService
 
         $beforeApps = EntraApp::pluck('display_name', 'app_id')->toArray();
         
+        $this->seenAppIds = [];
+        $this->seenSecrets = [];
+
         // Sync App Registrations
         $this->syncAppRegistrations($token);
 
@@ -62,15 +67,23 @@ class EntraIdService
         // Sync App Proxy Certificates (Beta endpoint)
         $this->syncAppProxyCertificates($token);
 
+        // Prune secrets that were not seen in this sync
+        $this->pruneUnseenSecrets();
+
         // Prune apps with no secrets and no notes/tags
         $this->pruneBoringApps();
 
+        // Delete apps not seen in this sync (deleted from Entra)
+        $this->deleteUnseenApps();
+
         $afterApps = EntraApp::pluck('display_name', 'app_id')->toArray();
 
-        // Change Logging for Apps
+        // Change Logging for Apps Added
         foreach (array_diff_key($afterApps, $beforeApps) as $appId => $name) {
             $app = EntraApp::where('app_id', $appId)->first();
-            AuditLog::log('entra_app_added', "New Entra App discovered: {$name}", [], $app->id);
+            if ($app) {
+                AuditLog::log('entra_app_added', "New Entra App discovered: {$name}", [], $app->id);
+            }
         }
     }
 
@@ -94,12 +107,13 @@ class EntraIdService
                         ]
                     );
 
+                    $this->seenAppIds[] = $appData['appId'];
                     $this->syncSecrets($app, $appData);
                 }
                 $url = $data['@odata.nextLink'] ?? null;
             } else {
                 Log::error("Failed to sync App Registrations: " . $response->body());
-                $url = null;
+                throw new \Exception("Failed to sync App Registrations: " . $response->body());
             }
         }
     }
@@ -135,6 +149,8 @@ class EntraIdService
                             ]);
                         }
 
+                        $this->seenAppIds[] = $appData['appId'];
+
                         if (!empty($appData['passwordCredentials']) || !empty($appData['keyCredentials'])) {
                             $this->syncSecrets($app, $appData);
                         }
@@ -143,7 +159,7 @@ class EntraIdService
                 $url = $data['@odata.nextLink'] ?? null;
             } else {
                 Log::error("Failed to sync Enterprise Apps: " . $response->body());
-                $url = null;
+                throw new \Exception("Failed to sync Enterprise Apps: " . $response->body());
             }
         }
     }
@@ -151,8 +167,10 @@ class EntraIdService
     protected function syncAppProxyCertificates($token)
     {
         // Microsoft Graph list endpoints often omit onPremisesPublishing content.
-        // We must fetch it individually for each app that we have already discovered.
-        $apps = EntraApp::where('type', 'app_registration')->get();
+        // We must fetch it individually for each app that we have already discovered and is active.
+        $apps = EntraApp::where('type', 'app_registration')
+            ->whereIn('app_id', $this->seenAppIds)
+            ->get();
         
         foreach ($apps as $app) {
             $url = "https://graph.microsoft.com/beta/applications/{$app->object_id}?\$select=onPremisesPublishing";
@@ -160,6 +178,11 @@ class EntraIdService
             
             if ($response->status() == 403) {
                 Log::warning("EntraIdService: No permission to read onPremisesPublishing for {$app->display_name}. Update Entra ID App permissions.");
+                // Mark existing app proxy certs as seen to prevent deletion due to permission error
+                $existingProxyCerts = $app->secrets()->where('type', 'app_proxy_certificate')->pluck('key_id')->toArray();
+                foreach ($existingProxyCerts as $keyId) {
+                    $this->seenSecrets[$app->id][] = $keyId;
+                }
                 continue;
             }
 
@@ -170,6 +193,11 @@ class EntraIdService
                 }
             } else {
                 Log::error("Failed to sync App Proxy Cert for {$app->display_name}: " . $response->body());
+                // Mark existing app proxy certs as seen to prevent deletion due to temp error
+                $existingProxyCerts = $app->secrets()->where('type', 'app_proxy_certificate')->pluck('key_id')->toArray();
+                foreach ($existingProxyCerts as $keyId) {
+                    $this->seenSecrets[$app->id][] = $keyId;
+                }
             }
         }
     }
@@ -183,6 +211,42 @@ class EntraIdService
             ->delete();
     }
 
+    protected function deleteUnseenApps()
+    {
+        $unseenApps = EntraApp::whereNotIn('app_id', $this->seenAppIds)->get();
+
+        foreach ($unseenApps as $app) {
+            // Log removal of secrets
+            foreach ($app->secrets as $secret) {
+                AuditLog::log('entra_secret_removed', "Secret/cert removed from app {$app->display_name}: {$secret->display_name}", [], $app->id);
+            }
+
+            // Log removal of the app
+            AuditLog::log('entra_app_removed', "Entra App removed: {$app->display_name}", []);
+
+            $app->secrets()->delete();
+            $app->tags()->delete();
+            $app->delete();
+        }
+    }
+
+    protected function pruneUnseenSecrets()
+    {
+        $apps = EntraApp::whereIn('app_id', $this->seenAppIds)->get();
+
+        foreach ($apps as $app) {
+            $seenIds = $this->seenSecrets[$app->id] ?? [];
+
+            // Secrets to delete: any secret belonging to this app whose key_id is not in $seenIds
+            $unseenSecrets = $app->secrets()->whereNotIn('key_id', $seenIds)->get();
+
+            foreach ($unseenSecrets as $secret) {
+                AuditLog::log('entra_secret_removed', "Secret/cert removed from app {$app->display_name}: {$secret->display_name}", [], $app->id);
+                $secret->delete();
+            }
+        }
+    }
+
     protected function syncSecrets(EntraApp $app, array $data)
     {
         // BUG FIX: Only sync (and delete) secrets if the data actually contains the fields.
@@ -191,14 +255,18 @@ class EntraIdService
             return;
         }
 
-        $beforeSecrets = $app->secrets()->pluck('display_name', 'key_id')->toArray();
-        $presentKeyIds = [];
+        if (!isset($this->seenSecrets[$app->id])) {
+            $this->seenSecrets[$app->id] = [];
+        }
 
         // Secrets
         if (isset($data['passwordCredentials'])) {
             foreach ($data['passwordCredentials'] as $secret) {
                 $keyId = $secret['keyId'];
-                $presentKeyIds[] = $keyId;
+                $this->seenSecrets[$app->id][] = $keyId;
+
+                $exists = EntraAppSecret::where('entra_app_id', $app->id)->where('key_id', $keyId)->exists();
+
                 EntraAppSecret::updateOrCreate(
                     ['entra_app_id' => $app->id, 'key_id' => $keyId],
                     [
@@ -209,6 +277,15 @@ class EntraIdService
                         'end_date' => isset($secret['endDateTime']) ? now()->parse($secret['endDateTime']) : null,
                     ]
                 );
+
+                if (!$exists) {
+                    $expiredBefore = $app->secrets()->where('end_date', '<=', now())->where('type', 'secret')->exists();
+                    $action = $expiredBefore ? 'entra_secret_remediated' : 'entra_secret_added';
+                    $msg = $expiredBefore 
+                        ? "Secret/cert remediated (replaced expired) for app {$app->display_name}: {$secret['displayName']}"
+                        : "New secret/cert added to app {$app->display_name}: {$secret['displayName']}";
+                    AuditLog::log($action, $msg, [], $app->id);
+                }
             }
         }
 
@@ -227,8 +304,13 @@ class EntraIdService
                     ->where('end_date', $endDate)
                     ->first();
 
-                $secretModel = EntraAppSecret::updateOrCreate(
-                    ['entra_app_id' => $app->id, 'key_id' => $existing->key_id ?? $keyId],
+                $targetKeyId = $existing->key_id ?? $keyId;
+                $this->seenSecrets[$app->id][] = $targetKeyId;
+
+                $exists = EntraAppSecret::where('entra_app_id', $app->id)->where('key_id', $targetKeyId)->exists();
+
+                EntraAppSecret::updateOrCreate(
+                    ['entra_app_id' => $app->id, 'key_id' => $targetKeyId],
                     [
                         'display_name' => $key['displayName'],
                         'type' => 'certificate',
@@ -237,7 +319,15 @@ class EntraIdService
                         'end_date' => $endDate,
                     ]
                 );
-                $presentKeyIds[] = $secretModel->key_id;
+
+                if (!$exists) {
+                    $expiredBefore = $app->secrets()->where('end_date', '<=', now())->where('type', 'certificate')->exists();
+                    $action = $expiredBefore ? 'entra_secret_remediated' : 'entra_secret_added';
+                    $msg = $expiredBefore 
+                        ? "Secret/cert remediated (replaced expired) for app {$app->display_name}: {$key['displayName']}"
+                        : "New secret/cert added to app {$app->display_name}: {$key['displayName']}";
+                    AuditLog::log($action, $msg, [], $app->id);
+                }
             }
         }
 
@@ -255,7 +345,9 @@ class EntraIdService
                 
                 // We use a synthetic key_id for these as they don't have a stable keyId in Graph
                 $keyId = "app_proxy_" . ($thumbprint ?? $index);
-                $presentKeyIds[] = $keyId;
+                $this->seenSecrets[$app->id][] = $keyId;
+
+                $exists = EntraAppSecret::where('entra_app_id', $app->id)->where('key_id', $keyId)->exists();
 
                 EntraAppSecret::updateOrCreate(
                     ['entra_app_id' => $app->id, 'key_id' => $keyId],
@@ -267,45 +359,17 @@ class EntraIdService
                         'end_date' => $endDate,
                     ]
                 );
+
+                if (!$exists) {
+                    $expiredBefore = $app->secrets()->where('end_date', '<=', now())->where('type', 'app_proxy_certificate')->exists();
+                    $action = $expiredBefore ? 'entra_secret_remediated' : 'entra_secret_added';
+                    $msg = $expiredBefore 
+                        ? "Secret/cert remediated (replaced expired) for app {$app->display_name}: " . ($cert['subjectName'] ?? "App Proxy Certificate")
+                        : "New secret/cert added to app {$app->display_name}: " . ($cert['subjectName'] ?? "App Proxy Certificate");
+                    AuditLog::log($action, $msg, [], $app->id);
+                }
             }
         }
-
-        $afterSecrets = $app->secrets()->whereIn('key_id', $presentKeyIds)->pluck('display_name', 'key_id')->toArray();
-
-        // Detect Remediations (expired secret replaced by a new one)
-        $expiredBefore = $app->secrets()->where('end_date', '<=', now())->pluck('key_id')->toArray();
-        $hasNewSecret = count(array_diff_key($afterSecrets, $beforeSecrets)) > 0;
-
-        // Logging for Secrets
-        foreach (array_diff_key($afterSecrets, $beforeSecrets) as $keyId => $name) {
-            $action = 'entra_secret_added';
-            $msg = "New secret/cert added to app {$app->display_name}: {$name}";
-            
-            if (!empty($expiredBefore)) {
-                $action = 'entra_secret_remediated';
-                $msg = "Secret/cert remediated (replaced expired) for app {$app->display_name}: {$name}";
-            }
-            
-            AuditLog::log($action, $msg, [], $app->id);
-        }
-
-        foreach (array_diff_key($beforeSecrets, $afterSecrets) as $keyId => $name) {
-            AuditLog::log('entra_secret_removed', "Secret/cert removed from app {$app->display_name}: {$name}", [], $app->id);
-        }
-
-        // Delete secrets NOT in the current sync source list
-        // BUT only if we are syncing the correct source for that type.
-        // (App Proxy certs are only in onPremisesPublishing, others are in password/keyCredentials)
-        $query = $app->secrets()->whereNotIn('key_id', $presentKeyIds);
-        
-        if (isset($data['passwordCredentials']) || isset($data['keyCredentials'])) {
-            $query->whereIn('type', ['secret', 'certificate']);
-        }
-        if (isset($data['onPremisesPublishing'])) {
-            $query->where('type', 'app_proxy_certificate');
-        }
-        
-        $query->delete();
     }
 
     public function getExpiringItems($daysThreshold = 30)

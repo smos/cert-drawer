@@ -1317,10 +1317,30 @@
                     }
 
                     const cert = data.certificate;
+                    const isCsr = cert.type === 'CSR';
+
                     let html = `
                         <div style="font-family: monospace; font-size: 0.9rem;">
                             <p><strong>Common Name:</strong> ${cert.common_name}</p>
                             <p><strong>Status:</strong> <span class="tag">${cert.status}</span></p>
+                    `;
+
+                    if (isCsr) {
+                        if (cert.sans && cert.sans.length > 0) {
+                            html += `<p><strong>Subject Alternative Names (SANs):</strong><br>
+                                <span style="display:inline-block; margin-top:5px; padding-left:10px; color:#555;">
+                                    ${cert.sans.map(san => `• ${san}`).join('<br>')}
+                                </span></p>`;
+                        } else {
+                            html += `<p><strong>Subject Alternative Names (SANs):</strong> None</p>`;
+                        }
+                        html += `
+                            <hr>
+                            <p><strong>Certificate Signing Request (PEM):</strong></p>
+                            <textarea readonly style="width: 100%; height: 150px; font-size: 0.8rem; padding: 10px; background: #f8f9fa; border: 1px solid #ddd;">${cert.csr_body || 'N/A'}</textarea>
+                        `;
+                    } else {
+                        html += `
                             <p><strong>Issuer:</strong> ${cert.issuer || 'N/A'}</p>
                             <p><strong>Valid From:</strong> ${cert.valid_from || 'N/A'}</p>
                             <p><strong>Expiry Date:</strong> ${cert.expiry_date || 'N/A'}</p>
@@ -1328,11 +1348,23 @@
                             <p><strong>SHA1 Thumbprint:</strong> ${cert.thumbprint_sha1 || 'N/A'}</p>
                             <p><strong>SHA256 Thumbprint:</strong> ${cert.thumbprint_sha256 || 'N/A'}</p>
                             <p><strong>Is CA:</strong> ${cert.is_ca ? 'Yes' : 'No'}</p>
+                        `;
+                        if (cert.sans && cert.sans.length > 0) {
+                            html += `<p><strong>Subject Alternative Names (SANs):</strong><br>
+                                <span style="display:inline-block; margin-top:5px; padding-left:10px; color:#555;">
+                                    ${cert.sans.map(san => `• ${san}`).join('<br>')}
+                                </span></p>`;
+                        } else {
+                            html += `<p><strong>Subject Alternative Names (SANs):</strong> None</p>`;
+                        }
+                        html += `
                             <hr>
                             <p><strong>Public Key (PEM):</strong></p>
                             <textarea readonly style="width: 100%; height: 150px; font-size: 0.8rem; padding: 10px; background: #f8f9fa; border: 1px solid #ddd;">${cert.certificate || 'N/A'}</textarea>
-                        </div>
-                    `;
+                        `;
+                    }
+
+                    html += `</div>`;
 
                     document.getElementById('details-content').innerHTML = html;
                     document.getElementById('details-modal').style.display = 'block';

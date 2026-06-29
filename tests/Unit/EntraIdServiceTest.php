@@ -91,4 +91,178 @@ class EntraIdServiceTest extends TestCase
 
         $this->assertTrue($items->contains('id', $longExpired->id), "Long expired item should be included when threshold is 0");
     }
+
+    public function test_sync_does_not_spam_audit_logs_for_readded_secrets()
+    {
+        Setting::updateOrCreate(['key' => 'entra_tenant_id'], ['value' => 'test-tenant']);
+        Setting::updateOrCreate(['key' => 'entra_client_id'], ['value' => 'test-client']);
+        Setting::updateOrCreate(['key' => 'entra_client_secret'], ['value' => 'test-secret']);
+
+        \Illuminate\Support\Facades\Http::fake([
+            'https://login.microsoftonline.com/*' => \Illuminate\Support\Facades\Http::response(['access_token' => 'mock-token']),
+            'https://graph.microsoft.com/v1.0/applications*' => \Illuminate\Support\Facades\Http::response([
+                'value' => [
+                    [
+                        'id' => 'obj-123',
+                        'appId' => 'app-123',
+                        'displayName' => 'Test App',
+                        'passwordCredentials' => [
+                            [
+                                'keyId' => 'cred-1',
+                                'displayName' => 'Client Secret 1',
+                                'startDateTime' => now()->subDays(10)->toIso8601String(),
+                                'endDateTime' => now()->addYear()->toIso8601String(),
+                                'hint' => 'abc',
+                            ]
+                        ],
+                        'keyCredentials' => [],
+                    ]
+                ]
+            ]),
+            'https://graph.microsoft.com/v1.0/servicePrincipals*' => \Illuminate\Support\Facades\Http::response([
+                'value' => [
+                    [
+                        'id' => 'sp-123',
+                        'appId' => 'app-123',
+                        'displayName' => 'Test App',
+                        'appOwnerOrganizationId' => 'my-org',
+                        'passwordCredentials' => [
+                            [
+                                'keyId' => 'cred-sp-1',
+                                'displayName' => 'SP Secret 1',
+                                'startDateTime' => now()->subDays(10)->toIso8601String(),
+                                'endDateTime' => now()->addYear()->toIso8601String(),
+                                'hint' => 'def',
+                            ]
+                        ],
+                        'keyCredentials' => [],
+                    ]
+                ]
+            ]),
+            'https://graph.microsoft.com/beta/applications/*' => \Illuminate\Support\Facades\Http::response([
+                'onPremisesPublishing' => null
+            ]),
+        ]);
+
+        $service = new EntraIdService();
+        
+        // First sync
+        $service->syncApplications();
+
+        // Check database
+        $app = EntraApp::where('app_id', 'app-123')->first();
+        $this->assertNotNull($app);
+        $this->assertEquals(2, $app->secrets()->count()); // both client secret and sp secret should coexist
+        
+        // Count audit logs for secret additions
+        $initialLogsCount = \App\Models\AuditLog::where('action', 'entra_secret_added')->count();
+        $this->assertEquals(2, $initialLogsCount); // cred-1 and cred-sp-1
+
+        // Sync again
+        $service->syncApplications();
+
+        // Check that NO new audit logs for adding/removing secrets were created
+        $newAddLogs = \App\Models\AuditLog::where('action', 'entra_secret_added')->count() - $initialLogsCount;
+        $removeLogs = \App\Models\AuditLog::where('action', 'entra_secret_removed')->count();
+
+        $this->assertEquals(0, $newAddLogs, "Should not log duplicate secret additions");
+        $this->assertEquals(0, $removeLogs, "Should not log incorrect secret removals");
+    }
+
+    public function test_sync_removes_deleted_apps_and_logs_them()
+    {
+        Setting::updateOrCreate(['key' => 'entra_tenant_id'], ['value' => 'test-tenant']);
+        Setting::updateOrCreate(['key' => 'entra_client_id'], ['value' => 'test-client']);
+        Setting::updateOrCreate(['key' => 'entra_client_secret'], ['value' => 'test-secret']);
+
+        $appsResponse = [
+            [
+                'id' => 'obj-gisib',
+                'appId' => 'app-gisib',
+                'displayName' => 'GISIB',
+                'passwordCredentials' => [
+                    [
+                        'keyId' => 'cred-gisib',
+                        'displayName' => 'GISIB Secret',
+                        'startDateTime' => now()->subDays(10)->toIso8601String(),
+                        'endDateTime' => now()->addYear()->toIso8601String(),
+                    ]
+                ],
+                'keyCredentials' => [],
+            ],
+            [
+                'id' => 'obj-sharepoint',
+                'appId' => 'app-sharepoint',
+                'displayName' => 'SharePoint Online',
+                'passwordCredentials' => [
+                    [
+                        'keyId' => 'cred-sharepoint',
+                        'displayName' => 'SharePoint Secret',
+                        'startDateTime' => now()->subDays(10)->toIso8601String(),
+                        'endDateTime' => now()->addYear()->toIso8601String(),
+                    ]
+                ],
+                'keyCredentials' => [],
+            ]
+        ];
+
+        \Illuminate\Support\Facades\Http::fake(function ($request) use (&$appsResponse) {
+            if (str_contains($request->url(), 'login.microsoftonline.com')) {
+                return \Illuminate\Support\Facades\Http::response(['access_token' => 'mock-token']);
+            }
+            if (str_contains($request->url(), 'v1.0/applications')) {
+                return \Illuminate\Support\Facades\Http::response(['value' => $appsResponse]);
+            }
+            if (str_contains($request->url(), 'v1.0/servicePrincipals')) {
+                return \Illuminate\Support\Facades\Http::response(['value' => []]);
+            }
+            if (str_contains($request->url(), 'beta/applications')) {
+                return \Illuminate\Support\Facades\Http::response(['onPremisesPublishing' => null]);
+            }
+            return \Illuminate\Support\Facades\Http::response([], 404);
+        });
+
+        $service = new EntraIdService();
+        $service->syncApplications();
+
+        $this->assertEquals(2, EntraApp::count());
+        $this->assertEquals(2, EntraAppSecret::count());
+
+        // GISIB is deleted in Entra ID (only SharePoint remains in mock response)
+        $appsResponse = [
+            [
+                'id' => 'obj-sharepoint',
+                'appId' => 'app-sharepoint',
+                'displayName' => 'SharePoint Online',
+                'passwordCredentials' => [
+                    [
+                        'keyId' => 'cred-sharepoint',
+                        'displayName' => 'SharePoint Secret',
+                        'startDateTime' => now()->subDays(10)->toIso8601String(),
+                        'endDateTime' => now()->addYear()->toIso8601String(),
+                    ]
+                ],
+                'keyCredentials' => [],
+            ]
+        ];
+
+        $service->syncApplications();
+
+        // GISIB should be deleted
+        $this->assertEquals(1, EntraApp::count());
+        $this->assertNull(EntraApp::where('app_id', 'app-gisib')->first());
+        $this->assertEquals(1, EntraAppSecret::count());
+        $this->assertNull(EntraAppSecret::where('key_id', 'cred-gisib')->first());
+
+        // Check that removal audit logs were created
+        $appRemovedLog = \App\Models\AuditLog::where('action', 'entra_app_removed')
+            ->where('description', 'like', '%GISIB%')
+            ->first();
+        $secretRemovedLog = \App\Models\AuditLog::where('action', 'entra_secret_removed')
+            ->where('description', 'like', '%GISIB%')
+            ->first();
+
+        $this->assertNotNull($appRemovedLog, "Should log app removal");
+        $this->assertNotNull($secretRemovedLog, "Should log secret removal");
+    }
 }
