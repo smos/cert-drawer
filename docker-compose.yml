@@ -1,6 +1,9 @@
 services:
   certkast:
-    build: .
+    build:
+      context: .
+      args:
+        - BUILD_DATE=${BUILD_DATE:-unknown}
     container_name: cert-drawer
     ports:
       - "8080:80"
@@ -21,7 +24,10 @@ services:
       retries: 3
 
   scheduler:
-    build: .
+    build:
+      context: .
+      args:
+        - BUILD_DATE=${BUILD_DATE:-unknown}
     container_name: cert-drawer-scheduler
     entrypoint: ["/usr/local/bin/entrypoint.sh", "php", "artisan", "schedule:work"]
     volumes:
