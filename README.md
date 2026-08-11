@@ -6,7 +6,7 @@ It is written almost entirely using gemini-cli, antigravity. Based on a Laravel 
 There is a mass import option available via the CLI to import a folder, but the web front end supports adding a domain manually and uploading seperate files as well as importing PFX files.
 
 ## Architecture:
-You can run the container without a external poller, but that complicates the dual-stack deployment. I advise to use the external_poller.php script that is in the repo that you can deploy on a seperate dual-stack host. The connection to the poller uses a shared secret and only JSON messages are sent back and forth so that the page can not be used as a proxy or for Recon.
+You can run the container without a external poller, but that complicates the dual-stack deployment. I advise to use the external-poller/healthtest.php script that is in the repo that you can deploy on a seperate dual-stack host. The connection to the poller uses a shared secret and only JSON messages are sent back and forth so that the page can not be used as a proxy or for Recon.
 
 The RBAC roles require LDAP authentication, the app does not have a native users and groups manager.
 
