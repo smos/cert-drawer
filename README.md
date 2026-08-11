@@ -15,12 +15,16 @@ The RBAC roles require LDAP authentication, the app does not have a native users
 ## Screenshots
 Menu
 ![alt text Menu](screenshots/menu.png?raw=true "Menu")
+
 Dashboard/Calendar
 ![alt text Calendar](screenshots/calendar.png?raw=true "Calendar")
+
 LDAP Auth options
 ![alt text LDAP Auth Options](screenshots/ldapauth.png?raw=true "LDAP Auth Options")
+
 Domain List
 ![alt text Domain List](screenshots/domainlist.png?raw=true "Domain List")
+
 Certificate Details
 ![alt text Certificate Details](screenshots/certificatedetails.png?raw=true "Certificate Details")
 
