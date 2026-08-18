@@ -17,7 +17,10 @@
 
 <div style="display: grid; grid-template-columns: 1fr; gap: 20px;">
     <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); overflow: hidden;">
-        <h3 style="margin-top: 0; margin-bottom: 15px;">Monitored Domains</h3>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; gap: 10px; flex-wrap: wrap;">
+            <h3 style="margin: 0;">Monitored Domains</h3>
+            <input type="text" id="domainSearch" placeholder="Search domains..." style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; width: 250px;">
+        </div>
         <div class="table-responsive">
             <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
                 <thead>
@@ -29,7 +32,7 @@
                 </thead>
                 <tbody>
                     @foreach($domains as $domain)
-                        <tr style="border-bottom: 1px solid #eee;">
+                        <tr style="border-bottom: 1px solid #eee;" class="dns-domain-row" data-domain-name="{{ strtolower($domain->name) }}">
                             <td style="padding: 12px 15px;">
                                 <strong style="cursor:pointer; color: #3498db;" onclick="openDrawer({{ $domain->id }})">{{ $domain->name }}</strong>
                             </td>
@@ -86,3 +89,22 @@
     </div>
 </div>
 @endsection
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const domainSearch = document.getElementById('domainSearch');
+    if (domainSearch) {
+        domainSearch.addEventListener('input', function() {
+            const query = this.value.toLowerCase().trim();
+            document.querySelectorAll('.dns-domain-row').forEach(row => {
+                const domainName = row.getAttribute('data-domain-name');
+                if (domainName.includes(query)) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        });
+    }
+});
+</script>

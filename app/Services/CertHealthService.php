@@ -57,6 +57,25 @@ class CertHealthService
                                         'expiry_date' => $ipResult['expiry_date'] ?? null,
                                         'error' => $ipResult['error'] ?? null,
                                     ]);
+
+                                    $thumbprint = $ipResult['thumbprint_sha256'] ?? null;
+                                    $error = $ipResult['error'] ?? null;
+                                    if ($thumbprint && !$error) {
+                                        $existing = \App\Models\Certificate::where('thumbprint_sha256', $thumbprint)->first();
+                                        if (!$existing) {
+                                            if (!empty($ipResult['pem'])) {
+                                                $pem = $ipResult['pem'];
+                                                $info = @openssl_x509_parse($pem);
+                                                if ($info) {
+                                                    $this->autoImportCert($domain, $pem, $info, $thumbprint);
+                                                } else {
+                                                    $this->fetchAndImportCert($domain, $ipResult['ip_address'] ?? null, $ipResult['ip_version'] ?? null);
+                                                }
+                                            } else {
+                                                $this->fetchAndImportCert($domain, $ipResult['ip_address'] ?? null, $ipResult['ip_version'] ?? null);
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -155,6 +174,10 @@ class CertHealthService
                     
                     // Generate SHA256 Thumbprint
                     $thumbprint = openssl_x509_fingerprint($cert, 'sha256');
+
+                    // Export PEM and auto-import
+                    openssl_x509_export($cert, $pem, true);
+                    $this->autoImportCert($domain, $pem, $info, $thumbprint);
                 }
             }
             fclose($fp);
@@ -172,5 +195,109 @@ class CertHealthService
             'expiry_date' => $expiry,
             'error' => $error,
         ]);
+    }
+
+    protected function autoImportCert(Domain $domain, string $pem, array $info, string $thumbprint): void
+    {
+        try {
+            $existing = \App\Models\Certificate::where('thumbprint_sha256', $thumbprint)->first();
+            if ($existing) {
+                return;
+            }
+
+            $certService = app(\App\Services\CertificateService::class);
+            $cn = $info['subject']['commonName'] ?? $info['subject']['CN'] ?? $domain->name;
+            if (is_array($cn)) $cn = $cn[0] ?? $domain->name;
+
+            $isCa = (isset($info['extensions']['basicConstraints']) && str_contains($info['extensions']['basicConstraints'], 'CA:TRUE'));
+
+            // Check if there is an open CSR for THIS domain that matches the public key of the certificate
+            $matchingCsr = \App\Models\Certificate::where('domain_id', $domain->id)
+                ->where('status', 'requested')
+                ->whereNotNull('csr')
+                ->get()
+                ->filter(function($c) use ($certService, $pem) {
+                    return $certService->comparePublicKeys($c->csr, $pem);
+                })
+                ->first();
+
+            if ($matchingCsr) {
+                $matchingCsr->update([
+                    'certificate' => $pem,
+                    'status' => 'issued',
+                    'expiry_date' => isset($info['validTo_time_t']) ? date('Y-m-d H:i:s', $info['validTo_time_t']) : null,
+                    'issuer' => $info['issuer']['CN'] ?? 'Unknown',
+                    'is_ca' => $isCa,
+                    'thumbprint_sha1' => $certService->extractThumbprint($pem, 'sha1'),
+                    'thumbprint_sha256' => $thumbprint,
+                    'serial_number' => $certService->extractSerialNumber($pem),
+                ]);
+                $certificate = $matchingCsr;
+                $finalDomainName = $domain->name;
+            } else {
+                $targetDomain = Domain::firstOrCreate(['name' => $cn]);
+                
+                $certificate = $targetDomain->certificates()->create([
+                    'request_type' => 'manual',
+                    'certificate' => $pem,
+                    'status' => 'issued',
+                    'expiry_date' => isset($info['validTo_time_t']) ? date('Y-m-d H:i:s', $info['validTo_time_t']) : null,
+                    'issuer' => $info['issuer']['CN'] ?? 'Unknown',
+                    'is_ca' => $isCa,
+                    'thumbprint_sha1' => $certService->extractThumbprint($pem, 'sha1'),
+                    'thumbprint_sha256' => $thumbprint,
+                    'serial_number' => $certService->extractSerialNumber($pem),
+                ]);
+                $finalDomainName = $targetDomain->name;
+            }
+
+            $path = "certificates/" . $finalDomainName . "/" . $certificate->created_at->format('Y-m-d_H-i-s');
+            \Illuminate\Support\Facades\Storage::disk('local')->put($path . "/certificate.cer", $pem);
+            
+            Log::info("CertHealthService: Automatically imported new certificate for {$finalDomainName} (Thumbprint: {$thumbprint})");
+        } catch (\Exception $e) {
+            Log::error("CertHealthService: Failed to auto-import certificate for {$domain->name}: " . $e->getMessage());
+        }
+    }
+
+    protected function fetchAndImportCert(Domain $domain, ?string $ip = null, ?string $version = null): void
+    {
+        try {
+            $port = 443;
+            $host = $domain->name;
+            
+            if ($ip) {
+                $remote = ($version === 'v6') ? "ssl://[{$ip}]:{$port}" : "ssl://{$ip}:{$port}";
+            } else {
+                $remote = "ssl://{$host}:{$port}";
+            }
+            
+            $context = stream_context_create([
+                'ssl' => [
+                    'capture_peer_cert' => true,
+                    'verify_peer' => false,
+                    'verify_peer_name' => false,
+                    'SNI_enabled' => true,
+                    'peer_name' => $host,
+                ],
+            ]);
+
+            $fp = @stream_socket_client($remote, $errno, $errstr, 5, STREAM_CLIENT_CONNECT, $context);
+            if ($fp) {
+                $params = stream_context_get_params($fp);
+                if (isset($params['options']['ssl']['peer_certificate'])) {
+                    $cert = $params['options']['ssl']['peer_certificate'];
+                    $info = openssl_x509_parse($cert);
+                    if ($info) {
+                        $thumbprint = openssl_x509_fingerprint($cert, 'sha256');
+                        openssl_x509_export($cert, $pem, true);
+                        $this->autoImportCert($domain, $pem, $info, $thumbprint);
+                    }
+                }
+                fclose($fp);
+            }
+        } catch (\Exception $e) {
+            Log::error("CertHealthService: Failed to fetch and import certificate for {$domain->name}: " . $e->getMessage());
+        }
     }
 }

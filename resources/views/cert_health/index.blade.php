@@ -7,12 +7,15 @@
     </div>
 @endif
 
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; gap: 15px; flex-wrap: wrap;">
     <h2>Live Certificate Health Monitoring</h2>
-    <form action="{{ route('cert-health.check-all') }}" method="POST">
-        @csrf
-        <button type="submit" class="btn btn-primary">Check All Domains (Now)</button>
-    </form>
+    <div style="display: flex; gap: 10px; align-items: center;">
+        <input type="text" id="domainSearch" placeholder="Search domains..." style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; width: 250px;">
+        <form action="{{ route('cert-health.check-all') }}" method="POST" style="margin: 0;">
+            @csrf
+            <button type="submit" class="btn btn-primary">Check All Domains (Now)</button>
+        </form>
+    </div>
 </div>
 
 <div class="table-responsive" style="background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); overflow: hidden;">
@@ -27,7 +30,7 @@
         </thead>
         <tbody>
             @foreach($domains as $domain)
-                <tr style="border-bottom: 1px solid #eee;">
+                <tr style="border-bottom: 1px solid #eee;" class="domain-row" data-domain-name="{{ strtolower($domain->name) }}">
                     <td style="padding: 12px 15px; font-weight: 600; vertical-align: top;">
                         <strong style="cursor:pointer; color: #3498db;" onclick="openDrawer({{ $domain->id }})">{{ $domain->name }}</strong>
                         @if($domain->mismatch)
@@ -162,4 +165,16 @@ function togglePoller(header) {
         if (healthySpan) healthySpan.style.display = 'inline';
     }
 }
+
+document.getElementById('domainSearch').addEventListener('input', function() {
+    const query = this.value.toLowerCase().trim();
+    document.querySelectorAll('.domain-row').forEach(row => {
+        const domainName = row.getAttribute('data-domain-name');
+        if (domainName.includes(query)) {
+            row.style.display = '';
+        } else {
+            row.style.display = 'none';
+        }
+    });
+});
 </script>

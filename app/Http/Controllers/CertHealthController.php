@@ -23,14 +23,16 @@ class CertHealthController extends Controller
             ->get();
 
         foreach ($domains as $domain) {
-            // Get latest check per IP AND check_type
-            $latestLogs = CertHealthLog::with('certificate.domain')->where('domain_id', $domain->id)
-                ->whereIn('id', function($query) use ($domain) {
-                    $query->selectRaw('MAX(id)')
-                        ->from('cert_health_logs')
-                        ->where('domain_id', $domain->id)
-                        ->groupBy('ip_address', 'check_type');
-                })->get();
+             // Get latest check per IP AND check_type
+             $latestLogs = CertHealthLog::with('certificate.domain')->where('domain_id', $domain->id)
+                 ->whereIn('check_type', ['internal', 'external'])
+                 ->whereIn('id', function($query) use ($domain) {
+                     $query->selectRaw('MAX(id)')
+                         ->from('cert_health_logs')
+                         ->where('domain_id', $domain->id)
+                         ->whereIn('check_type', ['internal', 'external'])
+                         ->groupBy('ip_address', 'check_type');
+                 })->get();
 
             $domain->health_logs = $latestLogs->groupBy('check_type');
             
@@ -193,7 +195,13 @@ class CertHealthController extends Controller
         $thumb256 = $certService->extractThumbprint($pem, 'sha256');
         $existing = Certificate::where('thumbprint_sha256', $thumb256)->first();
         if ($existing) {
-            return back()->with('success', "Certificate with this thumbprint already exists in the database (Domain: {$existing->domain->name}).");
+            // Update stale log with the actual live thumbprint to keep UI in sync
+            $log->update([
+                'thumbprint_sha256' => $thumb256,
+                'issuer' => $info['issuer']['CN'] ?? 'Unknown',
+                'expiry_date' => isset($info['validTo_time_t']) ? date('Y-m-d H:i:s', $info['validTo_time_t']) : null,
+            ]);
+            return back()->with('success', "Certificate with this thumbprint already exists in the database (Domain: {$existing->domain->name}). Updated health log.");
         }
 
         $cn = $info['subject']['commonName'] ?? $info['subject']['CN'] ?? $log->domain->name;
@@ -242,8 +250,17 @@ class CertHealthController extends Controller
             $finalDomainName = $domain->name;
         }
 
+        // Update stale log with the actual live thumbprint to keep UI in sync
+        $log->update([
+            'thumbprint_sha256' => $thumb256,
+            'issuer' => $info['issuer']['CN'] ?? 'Unknown',
+            'expiry_date' => isset($info['validTo_time_t']) ? date('Y-m-d H:i:s', $info['validTo_time_t']) : null,
+        ]);
+
         $path = "certificates/" . $finalDomainName . "/" . $certificate->created_at->format('Y-m-d_H-i-s');
         \Illuminate\Support\Facades\Storage::disk('local')->put($path . "/certificate.cer", $pem);
+
+        return back()->with('success', "Certificate for {$cn} imported successfully.");
 
         return back()->with('success', "Certificate for {$cn} imported successfully.");
     }
