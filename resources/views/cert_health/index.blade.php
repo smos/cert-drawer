@@ -166,15 +166,20 @@ function togglePoller(header) {
     }
 }
 
-document.getElementById('domainSearch').addEventListener('input', function() {
-    const query = this.value.toLowerCase().trim();
-    document.querySelectorAll('.domain-row').forEach(row => {
-        const domainName = row.getAttribute('data-domain-name');
-        if (domainName.includes(query)) {
-            row.style.display = '';
-        } else {
-            row.style.display = 'none';
-        }
-    });
+document.addEventListener('DOMContentLoaded', function() {
+    const domainSearch = document.getElementById('domainSearch');
+    if (domainSearch) {
+        domainSearch.addEventListener('input', function() {
+            const query = this.value.toLowerCase().trim();
+            document.querySelectorAll('.domain-row').forEach(row => {
+                const domainName = row.getAttribute('data-domain-name');
+                if (domainName.includes(query)) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        });
+    }
 });
 </script>
