@@ -234,8 +234,17 @@ class CertHealthService
                 ]);
                 $certificate = $matchingCsr;
                 $finalDomainName = $domain->name;
+
+                \App\Models\AuditLog::log(
+                    'cert_import',
+                    "Automatically fulfilled pending CSR for domain {$finalDomainName} (Thumbprint: {$thumbprint})"
+                );
             } else {
-                $targetDomain = Domain::firstOrCreate(['name' => $cn]);
+                $targetDomain = Domain::where('name', $cn)->first();
+                if (!$targetDomain) {
+                    Log::warning("CertHealthService: Skipping auto-import for certificate with CN '{$cn}' because no matching domain exists in the database.");
+                    return;
+                }
                 
                 $certificate = $targetDomain->certificates()->create([
                     'request_type' => 'manual',
@@ -249,6 +258,11 @@ class CertHealthService
                     'serial_number' => $certService->extractSerialNumber($pem),
                 ]);
                 $finalDomainName = $targetDomain->name;
+
+                \App\Models\AuditLog::log(
+                    'cert_import',
+                    "Automatically imported certificate for domain {$finalDomainName} (Thumbprint: {$thumbprint})"
+                );
             }
 
             $path = "certificates/" . $finalDomainName . "/" . $certificate->created_at->format('Y-m-d_H-i-s');

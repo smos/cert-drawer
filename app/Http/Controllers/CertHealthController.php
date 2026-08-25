@@ -232,6 +232,11 @@ class CertHealthController extends Controller
             ]);
             $certificate = $matchingCsr;
             $finalDomainName = $log->domain->name;
+
+            \App\Models\AuditLog::log(
+                'cert_import',
+                "Manually fulfilled pending CSR for domain {$finalDomainName} (Thumbprint: {$thumb256})"
+            );
         } else {
             // Find or create domain for this certificate
             $domain = Domain::firstOrCreate(['name' => $cn]);
@@ -248,6 +253,11 @@ class CertHealthController extends Controller
                 'serial_number' => $certService->extractSerialNumber($pem),
             ]);
             $finalDomainName = $domain->name;
+
+            \App\Models\AuditLog::log(
+                'cert_import',
+                "Manually imported certificate for domain {$finalDomainName} (Thumbprint: {$thumb256})"
+            );
         }
 
         // Update stale log with the actual live thumbprint to keep UI in sync
