@@ -283,6 +283,16 @@
         <label>Cert Health Recipients (Comma-separated)</label><br>
         <input type="text" name="cert_mail_recipients" value="{{ $settings['cert_mail_recipients'] ?? '' }}" placeholder="admin@example.com, it@example.com" style="width:100%; padding:8px; border:1px solid #ddd;">
     </div>
+    <div style="margin-bottom:15px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 12px 15px; border-radius: 6px;">
+        <label style="font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px;">
+            <input type="hidden" name="notify_connection_issues" value="0">
+            <input type="checkbox" name="notify_connection_issues" value="1" {{ ($settings['notify_connection_issues'] ?? '0') == '1' ? 'checked' : '' }}>
+            Enable notifications on connection issues
+        </label>
+        <small style="color: #666; display: block; margin-top: 5px;">
+            When enabled, alerts will be sent for connection issues (e.g. connection refused, timeout, reset) and recovery notifications when connectivity is restored. When disabled (recommended), alerts are suppressed for transient connection issues and only sent for certificate renewals/changes, cross-IP mismatches, and certificate expiry.
+        </small>
+    </div>
     <div style="margin-bottom:15px">
         <label>Entra ID Alert Recipients (Comma-separated)</label><br>
         <input type="text" name="entra_mail_recipients" value="{{ $settings['entra_mail_recipients'] ?? '' }}" placeholder="admin@example.com, it@example.com" style="width:100%; padding:8px; border:1px solid #ddd;">

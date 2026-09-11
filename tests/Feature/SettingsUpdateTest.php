@@ -53,4 +53,23 @@ class SettingsUpdateTest extends TestCase
         $this->assertJson($emails);
         $this->assertEquals(['admin@example.com', 'tech@example.com'], json_decode($emails, true));
     }
+
+    public function test_general_settings_update_handles_notify_connection_issues_toggle()
+    {
+        $user = User::factory()->create();
+
+        // Enable setting
+        $response = $this->actingAs($user)->withoutMiddleware()->post(route('settings.update'), [
+            'notify_connection_issues' => '1',
+        ]);
+        $response->assertRedirect(route('settings.index'));
+        $this->assertEquals('1', Setting::where('key', 'notify_connection_issues')->value('value'));
+
+        // Disable setting
+        $response = $this->actingAs($user)->withoutMiddleware()->post(route('settings.update'), [
+            'notify_connection_issues' => '0',
+        ]);
+        $response->assertRedirect(route('settings.index'));
+        $this->assertEquals('0', Setting::where('key', 'notify_connection_issues')->value('value'));
+    }
 }

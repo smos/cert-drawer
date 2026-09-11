@@ -101,11 +101,16 @@ class MonitorCert extends Command
             ->where('created_at', '>=', $startTime)
             ->get();
 
-        $changes = [];
-        $expiryAlerts = [];
+        $groupedChanges = [];
+        $groupedExpiryAlerts = [];
 
         $yellowThreshold = (int) (Setting::where('key', 'expiry_yellow')->value('value') ?? 30);
         $redThreshold = (int) (Setting::where('key', 'expiry_red')->value('value') ?? 10);
+        $notifyConnectionIssues = in_array(
+            Setting::where('key', 'notify_connection_issues')->value('value'),
+            ['1', 1, true, 'true'],
+            true
+        );
 
         foreach ($newLogs as $newLog) {
             // Check for thumbprint/error changes
@@ -118,25 +123,69 @@ class MonitorCert extends Command
 
             if ($oldLog) {
                 $hasChange = false;
-                if ($newLog->thumbprint_sha256 !== $oldLog->thumbprint_sha256) {
-                    $hasChange = true;
-                }
-                if ($newLog->error !== $oldLog->error) {
-                    $hasChange = true;
+                $changeOldRecord = $oldLog->toArray();
+
+                if (!$notifyConnectionIssues) {
+                    // Suppress connection issues and recoveries unless there is a real certificate change
+                    if ($newLog->error) {
+                        // Connection failed (timeout, refused, reset, unreachable, etc.) - suppress notification
+                        $hasChange = false;
+                    } elseif ($oldLog->error) {
+                        // Current check is healthy, but previous check had an error (recovery)
+                        // Only alert if the certificate actually changed compared to the last healthy check
+                        $lastHealthyLog = CertHealthLog::where('domain_id', $newLog->domain_id)
+                            ->where('check_type', $newLog->check_type)
+                            ->where('ip_address', $newLog->ip_address)
+                            ->where('id', '<', $newLog->id)
+                            ->whereNotNull('thumbprint_sha256')
+                            ->latest()
+                            ->first();
+
+                        if ($lastHealthyLog && $lastHealthyLog->thumbprint_sha256 !== $newLog->thumbprint_sha256) {
+                            $hasChange = true;
+                            $changeOldRecord = $lastHealthyLog->toArray();
+                        } else {
+                            // Certificate matches previous healthy check or no prior cert; suppress recovery alert
+                            $hasChange = false;
+                        }
+                    } else {
+                        // Both old and new checks succeeded - check for certificate thumbprint change
+                        if ($newLog->thumbprint_sha256 !== $oldLog->thumbprint_sha256) {
+                            $hasChange = true;
+                        }
+                    }
+                } else {
+                    // Notifications on connection issues are enabled
+                    if ($newLog->thumbprint_sha256 !== $oldLog->thumbprint_sha256) {
+                        $hasChange = true;
+                    }
+                    if ($newLog->error !== $oldLog->error) {
+                        $hasChange = true;
+                    }
                 }
 
                 if ($hasChange) {
-                    // Ignore transitions to/from timeout as they can be spurious
-                    $isNewTimeout = $newLog->error && (stripos($newLog->error, 'timed out') !== false || stripos($newLog->error, '(110)') !== false);
-                    $isOldTimeout = $oldLog->error && (stripos($oldLog->error, 'timed out') !== false || stripos($oldLog->error, '(110)') !== false);
+                    $changeKey = $newLog->domain_id . '_' .
+                        $newLog->check_type . '_' .
+                        ($changeOldRecord['thumbprint_sha256'] ?? '') . '_' .
+                        ($newLog->thumbprint_sha256 ?? '') . '_' .
+                        ($changeOldRecord['error'] ?? '') . '_' .
+                        ($newLog->error ?? '');
 
-                    if (!$isNewTimeout && !$isOldTimeout) {
-                        $changes[] = [
+                    if (!isset($groupedChanges[$changeKey])) {
+                        $groupedChanges[$changeKey] = [
                             'domain' => $newLog->domain,
+                            'check_type' => $newLog->check_type,
+                            'ips' => [$newLog->ip_address],
                             'ip' => $newLog->ip_address,
-                            'old' => $oldLog->toArray(),
+                            'old' => $changeOldRecord,
                             'new' => $newLog->toArray(),
                         ];
+                    } else {
+                        if (!in_array($newLog->ip_address, $groupedChanges[$changeKey]['ips'])) {
+                            $groupedChanges[$changeKey]['ips'][] = $newLog->ip_address;
+                            $groupedChanges[$changeKey]['ip'] = implode(', ', $groupedChanges[$changeKey]['ips']);
+                        }
                     }
                 }
             }
@@ -169,10 +218,18 @@ class MonitorCert extends Command
                 }
 
                 if ($shouldAlert) {
-                    $cacheKey = "expiry_alert_{$domain->id}_" . substr($thumbprint, 0, 8) . "_{$thresholdType}_" . now()->toDateString();
-                    if (!\Illuminate\Support\Facades\Cache::has($cacheKey)) {
-                        $expiryAlerts[] = [
+                    $alertKey = "{$domain->id}_" . substr($thumbprint, 0, 8) . "_{$thresholdType}";
+                    $cacheKey = "expiry_alert_{$alertKey}_" . now()->toDateString();
+                    
+                    if (isset($groupedExpiryAlerts[$alertKey])) {
+                        if (!in_array($newLog->ip_address, $groupedExpiryAlerts[$alertKey]['ips'])) {
+                            $groupedExpiryAlerts[$alertKey]['ips'][] = $newLog->ip_address;
+                            $groupedExpiryAlerts[$alertKey]['ip'] = implode(', ', $groupedExpiryAlerts[$alertKey]['ips']);
+                        }
+                    } elseif (!\Illuminate\Support\Facades\Cache::has($cacheKey)) {
+                        $groupedExpiryAlerts[$alertKey] = [
                             'domain' => $domain,
+                            'ips' => [$newLog->ip_address],
                             'ip' => $newLog->ip_address,
                             'days' => $days,
                             'expiry' => $newLog->expiry_date->format('Y-m-d'),
@@ -196,6 +253,68 @@ class MonitorCert extends Command
                 }
             }
         }
+
+        // Check for cross-IP thumbprint mismatches across healthy IPs WITHIN THE SAME check_type for each monitored domain
+        $domainsInRun = $newLogs->pluck('domain')->unique('id');
+        foreach ($domainsInRun as $domain) {
+            foreach (['internal', 'external'] as $checkType) {
+                $latestLogsPerIp = $newLogs->where('domain_id', $domain->id)
+                    ->where('check_type', $checkType)
+                    ->whereNull('error')
+                    ->whereNotNull('thumbprint_sha256')
+                    ->groupBy('ip_address')
+                    ->map(fn($logs) => $logs->last());
+
+                $distinctThumbs = $latestLogsPerIp->pluck('thumbprint_sha256')->unique();
+
+                if ($distinctThumbs->count() > 1) {
+                    // Mismatch detected across IPs WITHIN THIS check_type (e.g. within internal, or within external)
+                    foreach ($latestLogsPerIp->groupBy('thumbprint_sha256') as $thumb => $logsForThumb) {
+                        $mismatchIps = $logsForThumb->pluck('ip_address')->unique()->values()->all();
+                        $firstLog = $logsForThumb->first();
+
+                        // Check if this thumbprint group is already captured in $groupedChanges
+                        $alreadyCaptured = false;
+                        foreach ($groupedChanges as $gk => $gc) {
+                            if ($gc['domain']->id === $domain->id 
+                                && ($gc['check_type'] ?? null) === $checkType 
+                                && ($gc['new']['thumbprint_sha256'] ?? '') === $thumb) {
+                                $alreadyCaptured = true;
+                                $groupedChanges[$gk]['has_mismatch'] = true;
+                                break;
+                            }
+                        }
+
+                        if (!$alreadyCaptured) {
+                            $changeKey = $domain->id . '_' . $checkType . '_mismatch_' . $thumb;
+                            $groupedChanges[$changeKey] = [
+                                'domain' => $domain,
+                                'check_type' => $checkType,
+                                'ips' => $mismatchIps,
+                                'ip' => implode(', ', $mismatchIps),
+                                'old' => [
+                                    'thumbprint_sha256' => null,
+                                    'error' => null,
+                                ],
+                                'new' => $firstLog->toArray(),
+                                'has_mismatch' => true,
+                                'is_divergent' => true,
+                            ];
+                        }
+                    }
+
+                    // Mark all changes for this domain and check_type as having a mismatch
+                    foreach ($groupedChanges as $gk => $gc) {
+                        if ($gc['domain']->id === $domain->id && ($gc['check_type'] ?? null) === $checkType) {
+                            $groupedChanges[$gk]['has_mismatch'] = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        $changes = array_values($groupedChanges);
+        $expiryAlerts = array_values($groupedExpiryAlerts);
 
         if (empty($changes) && empty($expiryAlerts)) {
             return;

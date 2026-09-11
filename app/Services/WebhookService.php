@@ -161,10 +161,18 @@ class WebhookService
         $lines = ["### 🔔 Cert Drawer Alert"];
         
         if (!empty($changes)) {
-            $lines[] = "**Changes detected:** " . count($changes) . " domains updated.";
+            $count = count($changes);
+            $lines[] = "**Changes detected:** " . $count . " certificate change" . ($count > 1 ? 's' : '') . " detected.";
             foreach (array_slice($changes, 0, 5) as $change) {
-                $domainName = is_object($change['domain']) ? $change['domain']->name : ($change['domain']['name'] ?? 'Unknown');
-                $lines[] = "- **{$domainName}** ({$change['ip']}): Fingerprint or status changed.";
+                $domainName = is_object($change['domain'] ?? null) 
+                    ? $change['domain']->name 
+                    : ($change['domain']['name'] ?? 'Unknown');
+                $ips = !empty($change['ips']) && is_array($change['ips']) 
+                    ? $change['ips'] 
+                    : (!empty($change['ip']) ? array_map('trim', explode(',', $change['ip'])) : []);
+                $ipCount = count($ips);
+                $ipStr = $ipCount > 1 ? "{$ipCount} IPs" : ($ips[0] ?? ($change['ip'] ?? 'Unknown'));
+                $lines[] = "- **{$domainName}** ({$ipStr}): Fingerprint or status changed.";
             }
             if (count($changes) > 5) {
                 $lines[] = "- ... and " . (count($changes) - 5) . " more.";
@@ -172,9 +180,12 @@ class WebhookService
         }
         
         if (!empty($expiryAlerts)) {
-            $lines[] = "**Expiry alerts:** " . count($expiryAlerts) . " certificates.";
+            $count = count($expiryAlerts);
+            $lines[] = "**Expiry alerts:** " . $count . " certificate" . ($count > 1 ? 's' : '') . ".";
             foreach (array_slice($expiryAlerts, 0, 5) as $alert) {
-                $domainName = is_object($alert['domain']) ? $alert['domain']->name : ($alert['domain']['name'] ?? 'Unknown');
+                $domainName = is_object($alert['domain'] ?? null) 
+                    ? $alert['domain']->name 
+                    : ($alert['domain']['name'] ?? 'Unknown');
                 $lines[] = "- **{$domainName}**: Expires in {$alert['days']} days ({$alert['expiry']})";
             }
             if (count($expiryAlerts) > 5) {

@@ -16,7 +16,7 @@ class TestCertMail extends Command
      *
      * @var string
      */
-    protected $signature = 'cert:test-mail {email? : The recipient email address} {--real : Use real expiring certificates from the database}';
+    protected $signature = 'cert:test-mail {email? : The recipient email address} {--real : Use real expiring certificates from the database} {--domain= : Test with a specific domain name}';
 
     /**
      * The console command description.
@@ -42,7 +42,72 @@ class TestCertMail extends Command
         $changes = [];
         $expiryAlerts = [];
 
-        if ($this->option('real')) {
+        if ($domainName = $this->option('domain')) {
+            $domain = Domain::where('name', $domainName)->first();
+            if (!$domain) {
+                $this->error("Domain '{$domainName}' not found in database.");
+                return;
+            }
+
+            $this->info("Fetching certificate health data for {$domain->name}...");
+
+            $distinctIps = \App\Models\CertHealthLog::where('domain_id', $domain->id)
+                ->latest('id')
+                ->take(30)
+                ->get()
+                ->pluck('ip_address')
+                ->unique()
+                ->values()
+                ->all();
+
+            $ips = [];
+            $newThumb = null;
+            $oldThumb = null;
+            $issuer = null;
+            $expiryDate = null;
+
+            foreach ($distinctIps as $ip) {
+                $newLog = \App\Models\CertHealthLog::where('domain_id', $domain->id)
+                    ->where('ip_address', $ip)
+                    ->latest('id')
+                    ->first();
+                $oldLog = \App\Models\CertHealthLog::where('domain_id', $domain->id)
+                    ->where('ip_address', $ip)
+                    ->where('id', '<', $newLog->id)
+                    ->latest('id')
+                    ->first();
+
+                if ($newLog) {
+                    $ips[] = $ip;
+                    $newThumb = $newThumb ?? $newLog->thumbprint_sha256;
+                    $issuer = $issuer ?? $newLog->issuer;
+                    $expiryDate = $expiryDate ?? $newLog->expiry_date;
+                    if ($oldLog && !$oldThumb) {
+                        $oldThumb = $oldLog->thumbprint_sha256;
+                    }
+                }
+            }
+
+            if (empty($ips)) {
+                $ips = ['185.110.174.12', '185.110.175.12', '2a02:2770:12::1'];
+            }
+
+            $changes[] = [
+                'domain' => $domain,
+                'ips' => $ips,
+                'ip' => implode(', ', $ips),
+                'old' => [
+                    'thumbprint_sha256' => $oldThumb ?? 'be85bb5d04709dfcff479d759170568a03ddebd1dafc2b6149b58a5b66c7220a',
+                    'error' => null,
+                ],
+                'new' => [
+                    'thumbprint_sha256' => $newThumb ?? '4c1e13c239e961de2558a6aac0968272381bca893f91372df2b06651574e73f0',
+                    'error' => null,
+                    'issuer' => $issuer ?? 'Trust Provider B.V. TLS RSA CA G1',
+                    'expiry_date' => $expiryDate ? $expiryDate->format('Y-m-d H:i:s') : '2027-03-17 23:59:59',
+                ],
+            ];
+        } elseif ($this->option('real')) {
             $this->info("Fetching real expiring certificates...");
             
             // Fetch some certificates that are expiring soon

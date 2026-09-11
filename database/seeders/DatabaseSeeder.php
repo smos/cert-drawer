@@ -36,6 +36,7 @@ class DatabaseSeeder extends Seeder
             // Admin & Notification Defaults
             'admin_groups' => 'cn=admins,ou=groups,dc=domain,dc=local',
             'admin_email' => 'admin@domain.local',
+            'notify_connection_issues' => '0',
         ];
 
         // Only seed settings if the table is empty
