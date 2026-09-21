@@ -388,7 +388,7 @@ class CertificateController extends Controller
 
             return response($pfxData)
                 ->header('Content-Type', 'application/x-pkcs12')
-                ->header('Content-Disposition', 'attachment; filename="' . $certificate->domain->name . '.pfx"');
+                ->header('Content-Disposition', 'attachment; filename="' . $certificate->domain->name . '_' . $certificate->id . '.pfx"');
 
         } catch (\Exception $e) {
             return response()->json(['error' => $e->getMessage()], 400);
@@ -423,7 +423,7 @@ class CertificateController extends Controller
 
             return response($pfxData)
                 ->header('Content-Type', 'application/x-pkcs12')
-                ->header('Content-Disposition', 'attachment; filename="' . $certificate->domain->name . '-legacy.pfx"');
+                ->header('Content-Disposition', 'attachment; filename="' . $certificate->domain->name . '_' . $certificate->id . '-legacy.pfx"');
 
         } catch (\Exception $e) {
             return response()->json(['error' => $e->getMessage()], 400);
@@ -490,19 +490,19 @@ class CertificateController extends Controller
                 AuditLog::log('cert_download', "Downloaded certificate for domain: {$certificate->domain->name}");
                 return response($certificate->certificate)
                     ->header('Content-Type', 'application/x-x509-ca-cert')
-                    ->header('Content-Disposition', 'attachment; filename="' . $certificate->domain->name . '.cer"');
+                    ->header('Content-Disposition', 'attachment; filename="' . $certificate->domain->name . '_' . $certificate->id . '.cer"');
             case 'chain':
                 $chain = $this->certService->getChain($certificate);
                 $content = $certificate->certificate . "\n" . implode("\n", $chain);
                 AuditLog::log('cert_chain_download', "Downloaded certificate chain for domain: {$certificate->domain->name}");
                 return response($content)
                     ->header('Content-Type', 'application/x-pem-file')
-                    ->header('Content-Disposition', 'attachment; filename="' . $certificate->domain->name . '-chain.pem"');
+                    ->header('Content-Disposition', 'attachment; filename="' . $certificate->domain->name . '_' . $certificate->id . '-chain.pem"');
             case 'csr':
                 AuditLog::log('csr_download', "Downloaded CSR for domain: {$certificate->domain->name}");
                 return response($certificate->csr)
                     ->header('Content-Type', 'application/x-pem-file')
-                    ->header('Content-Disposition', 'attachment; filename="' . $certificate->domain->name . '.csr"');
+                    ->header('Content-Disposition', 'attachment; filename="' . $certificate->domain->name . '_' . $certificate->id . '.csr"');
             case 'key':
                 if (!request()->isMethod('post')) {
                     abort(405, 'Method Not Allowed. Please use POST to transmit sensitive data.');
@@ -519,7 +519,7 @@ class CertificateController extends Controller
                 AuditLog::log('key_download', "Downloaded private key for domain: {$certificate->domain->name}");
                 return response(decrypt($certificate->private_key))
                     ->header('Content-Type', 'application/x-pem-file')
-                    ->header('Content-Disposition', 'attachment; filename="' . $certificate->domain->name . '.key"');
+                    ->header('Content-Disposition', 'attachment; filename="' . $certificate->domain->name . '_' . $certificate->id . '.key"');
         }
     }
 
