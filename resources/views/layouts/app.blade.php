@@ -273,11 +273,18 @@
         </div>
     </div>
 
-    <div id="fulfillment-modal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:white; padding:30px; box-shadow:0 0 20px rgba(0,0,0,0.5); z-index:1200; border-radius:8px; width:400px;">
+    <div id="fulfillment-modal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:white; padding:30px; box-shadow:0 0 20px rgba(0,0,0,0.5); z-index:1200; border-radius:8px; width:440px;">
         <h3>Choose Fulfillment Method</h3>
         <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:20px;">
             <button class="btn btn-primary" id="fulfill-adcs">Active Directory CS (ADCS)</button>
-            <button class="btn btn-primary" id="fulfill-acme">ACME (Networking4all)</button>
+            <button class="btn btn-primary" id="fulfill-acme-dv" style="display:flex; justify-content:space-between; align-items:center;">
+                <span>ACME (Networking4all)</span>
+                <span style="font-size:0.75rem; background:rgba(255,255,255,0.25); padding:2px 8px; border-radius:4px;">DV (Domain)</span>
+            </button>
+            <button class="btn btn-primary" id="fulfill-acme-ov" style="display:flex; justify-content:space-between; align-items:center; background:#0284c7;">
+                <span>ACME (Networking4all)</span>
+                <span style="font-size:0.75rem; background:rgba(255,255,255,0.25); padding:2px 8px; border-radius:4px;">OV (Organization)</span>
+            </button>
             <button class="btn btn-primary" id="fulfill-manual">Manual Upload (PEM)</button>
         </div>
         <div style="text-align:right;">
@@ -293,13 +300,14 @@
         </div>
     </div>
 
-    <div id="acme-processing-modal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:white; padding:30px; box-shadow:0 0 20px rgba(0,0,0,0.5); z-index:1200; border-radius:8px; width:400px; text-align:center;">
-        <h3>Processing ACME Request</h3>
+    <div id="acme-processing-modal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:white; padding:30px; box-shadow:0 0 25px rgba(0,0,0,0.5); z-index:1200; border-radius:8px; width:560px; max-width:92vw; max-height:85vh; overflow-y:auto; box-sizing:border-box; text-align:center;">
+        <h3 id="acme-modal-title" style="margin-top:0;">Processing ACME Request</h3>
         <div id="acme-spinner" style="margin: 20px auto; border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 2s linear infinite;"></div>
-        <p id="acme-status">Starting verification...</p>
-        <p id="acme-subtext" style="font-size: 0.8rem; color: #888;">This can take up to 5 minutes. Please do not close this window.</p>
-        <div id="acme-error-actions" style="display:none; margin-top: 20px;">
-             <button class="btn" onclick="document.getElementById('acme-processing-modal').style.display='none'; if(!drawer.classList.contains('open')) overlay.classList.remove('active');">Close</button>
+        <div id="acme-status" style="font-size: 0.95rem; line-height: 1.5; word-break: break-word;">Starting verification...</div>
+        <p id="acme-subtext" style="font-size: 0.8rem; color: #888; margin-top: 15px;">This can take up to 5 minutes. Please do not close this window.</p>
+        <div id="acme-error-actions" style="display:none; margin-top: 20px; text-align: right;">
+             <button class="btn" id="acme-recheck-btn" style="display:none; margin-right: 8px;">Check Status Again</button>
+             <button class="btn btn-primary" onclick="document.getElementById('acme-processing-modal').style.display='none'; if(!drawer.classList.contains('open')) overlay.classList.remove('active');">Close</button>
         </div>
     </div>
 
@@ -533,7 +541,7 @@
                                 </div>
                             </div>
                             <div class="collapsible">
-                                <p>Status: <span class="tag">${c.status}</span></p>
+                                <p>Status: <span class="tag">${c.status}</span> ${c.request_type === 'acme' ? `<span class="tag" style="background:#0284c7; color:white; font-size:0.75rem; margin-left:4px;">ACME (${(c.acme_type || 'dv').toUpperCase()})</span>` : ''}</p>
                                 <p>Authority: <span style="background: ${caColor}; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">${caName}</span></p>
                                 ${c.chain_incomplete ? `
                                     <div style="background: #fff3cd; color: #856404; border: 1px solid #ffeeba; padding: 8px; border-radius: 4px; font-size: 0.8rem; margin: 10px 0; display: flex; justify-content: space-between; align-items: center;">
@@ -555,7 +563,7 @@
                                         <button class="btn btn-sm" onclick="showFulfillmentOptions(${c.id}, ${domain.id})">Fulfill Certificate</button>
                                     ` : ''}
                                     ${c.status === 'pending_verification' ? `
-                                        <button class="btn btn-sm" style="background:#27ae60; color:white;" onclick="fulfillAcme(${c.id}, ${domain.id})">Verify & Fulfill ACME</button>
+                                        <button class="btn btn-sm" style="background:#27ae60; color:white;" onclick="fulfillAcme(${c.id}, ${domain.id})">Verify & Fulfill ACME (${(c.acme_type || 'dv').toUpperCase()})</button>
                                     ` : ''}
                                     ${c.status === 'issued' && c.request_type === 'acme' ? `
                                         <button class="btn btn-sm" style="background: #6c757d; color: white;" onclick="switchToManual(${c.id}, ${domain.id})" title="Disable ACME auto-renewal for this certificate">Disable Auto-Renewal</button>
@@ -1021,67 +1029,178 @@
             });
         }
 
-        function fulfillAcme(certificateId, domainId) {
+        async function fetchCertStatus(certId) {
+            try {
+                const res = await fetch(`/certificates/${certId}`);
+                const data = await res.json();
+                if (data.success && data.certificate) {
+                    return { ok: true, status: data.certificate.status, cert: data.certificate };
+                }
+            } catch (e) {}
+            return { ok: false, status: null };
+        }
+
+        async function fulfillAcme(certificateId, domainId) {
             console.log('fulfillAcme triggered for ID:', certificateId);
             const modal = document.getElementById('acme-processing-modal');
+            const modalTitle = document.getElementById('acme-modal-title');
             const statusText = document.getElementById('acme-status');
             const spinner = document.getElementById('acme-spinner');
             const subtext = document.getElementById('acme-subtext');
             const errorActions = document.getElementById('acme-error-actions');
+            const recheckBtn = document.getElementById('acme-recheck-btn');
             
             modal.style.display = 'block';
             overlay.classList.add('active');
 
             // Reset modal state
+            if (modalTitle) modalTitle.innerText = 'Processing ACME Request';
             statusText.innerText = 'Initializing ACME verification...';
             statusText.style.color = 'inherit';
+            statusText.style.background = 'transparent';
+            statusText.style.border = 'none';
+            statusText.style.padding = '0';
+            statusText.style.textAlign = 'center';
             spinner.style.display = 'block';
             subtext.style.display = 'block';
             errorActions.style.display = 'none';
+            if (recheckBtn) recheckBtn.style.display = 'none';
 
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
 
-            fetch(`/certificates/${certificateId}/acme-fulfill`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': '{{ csrf_token() }}'
-                },
-                signal: controller.signal
-            })
-            .then(res => res.json())
-            .then(data => {
+            let responseOk = false;
+            let responseStatus = 0;
+            let data = null;
+            let fetchFailed = false;
+            let failureError = null;
+
+            try {
+                const res = await fetch(`/certificates/${certificateId}/acme-fulfill`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                    },
+                    signal: controller.signal
+                });
                 clearTimeout(timeoutId);
-                if (data.success) {
-                    modal.style.display = 'none';
-                    alert('Success! Certificate has been issued via ACME service.');
-                    openDrawer(domainId);
-                } else {
-                    spinner.style.display = 'none';
-                    subtext.style.display = 'none';
-                    errorActions.style.display = 'block';
-                    statusText.innerText = 'ACME Error: ' + data.message;
-                    statusText.style.color = 'red';
+                responseOk = res.ok;
+                responseStatus = res.status;
+                const text = await res.text();
+                try {
+                    data = JSON.parse(text);
+                } catch (e) {
+                    // Non-JSON response (e.g. 504 Gateway Timeout, Cloudflare 524, or server HTML error)
+                    data = {
+                        success: false,
+                        is_non_json: true,
+                        message: `Server returned HTTP ${res.status}: ${res.statusText || 'Gateway Timeout or unexpected response'}`
+                    };
                 }
-            })
-            .catch(err => {
+            } catch (err) {
                 clearTimeout(timeoutId);
-                spinner.style.display = 'none';
-                subtext.style.display = 'none';
-                errorActions.style.display = 'block';
-                statusText.innerText = 'An error occurred: ' + err.message;
-                statusText.style.color = 'red';
-            });
+                fetchFailed = true;
+                failureError = err;
+            }
+
+            if (!fetchFailed && data && data.success) {
+                modal.style.display = 'none';
+                alert('Success! Certificate has been issued via ACME service.');
+                openDrawer(domainId);
+                return;
+            }
+
+            // Failure or timeout occurred. Detect if it was a timeout or server drop.
+            const isClientTimeout = fetchFailed && failureError && failureError.name === 'AbortError';
+            const isServerTimeout = [504, 524, 408, 502].includes(responseStatus) || (data && data.is_non_json);
+            const isTimeoutMsg = (data?.message || failureError?.message || '').toLowerCase().includes('time');
+            const isLikelyTimeout = isClientTimeout || isServerTimeout || isTimeoutMsg;
+
+            // Check if certificate was issued in the background despite the connection drop
+            statusText.innerText = 'Checking certificate status...';
+            statusText.style.color = '#6b7280';
+
+            let check = await fetchCertStatus(certificateId);
+
+            // If not issued yet and it was a timeout, wait 3 seconds and check once more in case DB write was finishing
+            if (!check.ok || check.status !== 'issued') {
+                if (isLikelyTimeout) {
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+                    check = await fetchCertStatus(certificateId);
+                }
+            }
+
+            spinner.style.display = 'none';
+            subtext.style.display = 'none';
+            errorActions.style.display = 'block';
+
+            if (check.ok && check.status === 'issued') {
+                if (modalTitle) modalTitle.innerText = 'Certificate Issued';
+                statusText.style.color = '#15803d';
+                statusText.style.background = '#f0fdf4';
+                statusText.style.border = '1px solid #bbf7d0';
+                statusText.style.padding = '14px 18px';
+                statusText.style.borderRadius = '6px';
+                statusText.style.textAlign = 'left';
+                statusText.innerHTML = `<strong>Timed Out, but certificate was issued!</strong><br><span style="font-size:0.85rem; color:#166534; display:block; margin-top:4px;">The connection timed out waiting for the server, but the ACME service completed successfully in the background and the certificate is saved.</span>`;
+                openDrawer(domainId);
+            } else if (isLikelyTimeout) {
+                if (modalTitle) modalTitle.innerText = 'Request Timed Out';
+                statusText.style.color = '#b45309';
+                statusText.style.background = '#fffbeb';
+                statusText.style.border = '1px solid #fde68a';
+                statusText.style.padding = '14px 18px';
+                statusText.style.borderRadius = '6px';
+                statusText.style.textAlign = 'left';
+                statusText.innerHTML = `<strong>Request Timed Out</strong><br><span style="font-size:0.85rem; color:#92400e; display:block; margin-top:4px;">The request timed out waiting for the ACME verification, and no certificate has been received yet. Background issuance may still be completing.</span>`;
+                
+                if (recheckBtn) {
+                    recheckBtn.style.display = 'inline-block';
+                    recheckBtn.onclick = async () => {
+                        recheckBtn.disabled = true;
+                        recheckBtn.innerText = 'Checking...';
+                        const recheck = await fetchCertStatus(certificateId);
+                        recheckBtn.disabled = false;
+                        recheckBtn.innerText = 'Check Status Again';
+                        if (recheck.ok && recheck.status === 'issued') {
+                            if (modalTitle) modalTitle.innerText = 'Certificate Issued';
+                            statusText.style.color = '#15803d';
+                            statusText.style.background = '#f0fdf4';
+                            statusText.style.border = '1px solid #bbf7d0';
+                            statusText.innerHTML = `<strong>Certificate is ready!</strong><br><span style="font-size:0.85rem; color:#166534; display:block; margin-top:4px;">The certificate was successfully verified and issued.</span>`;
+                            recheckBtn.style.display = 'none';
+                            openDrawer(domainId);
+                        } else {
+                            alert('Certificate status is currently: ' + (recheck.status || 'unknown') + '. It has not been issued yet.');
+                        }
+                    };
+                }
+            } else {
+                if (modalTitle) modalTitle.innerText = 'ACME Request Failed';
+                let msg = data?.message || failureError?.message || 'Unknown error occurred.';
+                msg = msg.replace(/^(ACME Error:\s*)+/i, '');
+
+                statusText.innerText = msg;
+                statusText.style.color = '#991b1b';
+                statusText.style.background = '#fef2f2';
+                statusText.style.border = '1px solid #fecaca';
+                statusText.style.padding = '14px 18px';
+                statusText.style.borderRadius = '6px';
+                statusText.style.textAlign = 'left';
+                statusText.style.maxHeight = '280px';
+                statusText.style.overflowY = 'auto';
+            }
         }
 
-        function initiateAcmeRequest(certificateId, domainId) {
+        function initiateAcmeRequest(certificateId, domainId, acmeType = 'dv') {
             fetch(`/certificates/${certificateId}/acme-request`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'X-CSRF-TOKEN': '{{ csrf_token() }}'
-                }
+                },
+                body: JSON.stringify({ acme_type: acmeType })
             })
             .then(res => res.json())
             .then(data => {
@@ -1104,9 +1223,14 @@
                 promptAdcsCredentials(certificateId, domainId);
             };
 
-            document.getElementById('fulfill-acme').onclick = () => {
+            document.getElementById('fulfill-acme-dv').onclick = () => {
                 modal.style.display = 'none';
-                initiateAcmeRequest(certificateId, domainId);
+                initiateAcmeRequest(certificateId, domainId, 'dv');
+            };
+
+            document.getElementById('fulfill-acme-ov').onclick = () => {
+                modal.style.display = 'none';
+                initiateAcmeRequest(certificateId, domainId, 'ov');
             };
 
             document.getElementById('fulfill-manual').onclick = () => {
@@ -1323,6 +1447,9 @@
                         <div style="font-family: monospace; font-size: 0.9rem;">
                             <p><strong>Common Name:</strong> ${cert.common_name}</p>
                             <p><strong>Status:</strong> <span class="tag">${cert.status}</span></p>
+                            ${(cert.request_type === 'acme' || cert.acme_type) ? `
+                                <p><strong>Validation Type:</strong> <span class="tag" style="background:#0284c7; color:white;">${(cert.acme_type || cert.effective_acme_type || 'dv').toUpperCase() === 'OV' ? 'Organization Validation (OV)' : 'Domain Validation (DV)'}</span></p>
+                            ` : ''}
                     `;
 
                     if (isCsr) {

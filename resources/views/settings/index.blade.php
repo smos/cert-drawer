@@ -64,19 +64,37 @@
             <label>External Account Binding (EAB) HMAC Key</label><br>
             <input type="password" name="acme_hmac" value="{{ isset($settings['acme_hmac']) ? '********' : '' }}" placeholder="Secret Key" style="width:100%; padding:8px; border:1px solid #ddd;">
         </div>
+        <div style="grid-column: span 2; margin-top: 5px;">
+            <strong style="color: #4b5563;">Domain Validation (DV) Endpoints:</strong>
+        </div>
         <div>
-            <label>ACME DV URL</label><br>
+            <label>ACME DV URL (Single Domain)</label><br>
             <input type="text" name="acme_url_dv" value="{{ $settings['acme_url_dv'] ?? 'https://acme.networking4all.com/dv' }}" style="width:100%; padding:8px; border:1px solid #ddd;">
         </div>
         <div>
-            <label>ACME DV-SAN URL</label><br>
+            <label>ACME DV-SAN URL (Multi-Domain)</label><br>
             <input type="text" name="acme_url_san" value="{{ $settings['acme_url_san'] ?? 'https://acme.networking4all.com/dv-san' }}" style="width:100%; padding:8px; border:1px solid #ddd;">
         </div>
         <div style="grid-column: span 2;">
             <label>ACME DV-Wildcard URL</label><br>
             <input type="text" name="acme_url_wildcard" value="{{ $settings['acme_url_wildcard'] ?? 'https://acme.networking4all.com/dv-wildcard' }}" style="width:100%; padding:8px; border:1px solid #ddd;">
         </div>
+        <div style="grid-column: span 2; margin-top: 10px;">
+            <strong style="color: #4b5563;">Organization Validation (OV) Endpoints:</strong>
+        </div>
+        <div>
+            <label>ACME OV URL (Single Domain)</label><br>
+            <input type="text" name="acme_url_ov" value="{{ $settings['acme_url_ov'] ?? 'https://acme.networking4all.com/ov' }}" style="width:100%; padding:8px; border:1px solid #ddd;">
+        </div>
+        <div>
+            <label>ACME OV-SAN URL (Multi-Domain)</label><br>
+            <input type="text" name="acme_url_ov_san" value="{{ $settings['acme_url_ov_san'] ?? 'https://acme.networking4all.com/ov-san' }}" style="width:100%; padding:8px; border:1px solid #ddd;">
+        </div>
         <div style="grid-column: span 2;">
+            <label>ACME OV-Wildcard URL</label><br>
+            <input type="text" name="acme_url_ov_wildcard" value="{{ $settings['acme_url_ov_wildcard'] ?? 'https://acme.networking4all.com/ov-wildcard' }}" style="width:100%; padding:8px; border:1px solid #ddd;">
+        </div>
+        <div style="grid-column: span 2; margin-top: 10px;">
             <label>Auto-Renewal Threshold (Days before expiry)</label><br>
             <input type="number" name="acme_renewal_days" value="{{ $settings['acme_renewal_days'] ?? '30' }}" min="1" style="width:100%; padding:8px; border:1px solid #ddd;">
             <small style="color: #666;">ACME certificates will be automatically renewed when they have fewer than this many days remaining.</small>

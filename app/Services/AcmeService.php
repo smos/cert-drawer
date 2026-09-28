@@ -46,23 +46,11 @@ class AcmeService
         $sans = $certService->extractSansFromCsr($certificate->csr);
         $allDomains = array_unique(array_merge([$commonName], $sans));
 
-        $isWildcard = false;
-        foreach ($allDomains as $d) if (str_starts_with($d, '*.')) $isWildcard = true;
-
-        $directoryUrl = $settings['acme_url_dv'] ?? '';
-        if ($isWildcard) {
-            $directoryUrl = $settings['acme_url_wildcard'] ?? '';
-        } elseif (count($allDomains) > 1) {
-            $directoryUrl = $settings['acme_url_san'] ?? '';
-        }
-
-        if (empty($directoryUrl)) {
-            throw new Exception("ACME Directory URL not configured for this request type.");
-        }
-
+        $directoryUrl = $this->resolveDirectoryUrl($certificate, $settings->toArray());
         $this->directoryUrl = $directoryUrl;
 
-        Log::info("Starting native ACME fulfillment for {$commonName} using {$directoryUrl}");
+        $acmeTypeLabel = strtoupper($certificate->acme_type ?? 'dv');
+        Log::info("Starting native ACME ({$acmeTypeLabel}) fulfillment for {$commonName} using {$directoryUrl}");
 
         try {
             // 1. Get Directory
@@ -131,17 +119,81 @@ class AcmeService
         }
     }
 
+    public function resolveDirectoryUrl(Certificate $certificate, ?array $settings = null): string
+    {
+        if ($settings === null) {
+            $settings = Setting::all()->pluck('value', 'key')->toArray();
+        }
+
+        $certService = app(CertificateService::class);
+        $info = $certService->getCertInfoFromCsr($certificate->csr);
+        $commonName = $info['commonName'] ?? $certificate->domain->name ?? '';
+        if (is_array($commonName)) $commonName = $commonName[0];
+
+        $sans = $certService->extractSansFromCsr($certificate->csr);
+        $allDomains = array_unique(array_filter(array_merge([$commonName], $sans)));
+
+        $isWildcard = false;
+        foreach ($allDomains as $d) {
+            if (str_starts_with($d, '*.')) {
+                $isWildcard = true;
+                break;
+            }
+        }
+
+        $acmeType = strtolower($certificate->acme_type ?? 'dv');
+        if ($acmeType !== 'ov') {
+            $acmeType = 'dv';
+        }
+
+        $directoryUrl = '';
+        $urlType = '';
+
+        if ($acmeType === 'ov') {
+            if ($isWildcard) {
+                $directoryUrl = $settings['acme_url_ov_wildcard'] ?? '';
+                $urlType = 'OV-Wildcard';
+            } elseif (count($allDomains) > 1) {
+                $directoryUrl = $settings['acme_url_ov_san'] ?? '';
+                $urlType = 'OV-SAN';
+            } else {
+                $directoryUrl = $settings['acme_url_ov'] ?? '';
+                $urlType = 'OV';
+            }
+        } else {
+            if ($isWildcard) {
+                $directoryUrl = $settings['acme_url_wildcard'] ?? '';
+                $urlType = 'DV-Wildcard';
+            } elseif (count($allDomains) > 1) {
+                $directoryUrl = $settings['acme_url_san'] ?? '';
+                $urlType = 'DV-SAN';
+            } else {
+                $directoryUrl = $settings['acme_url_dv'] ?? '';
+                $urlType = 'DV';
+            }
+        }
+
+        if (empty($directoryUrl)) {
+            throw new Exception("ACME {$urlType} Directory URL not configured in Settings.");
+        }
+
+        return $directoryUrl;
+    }
+
     protected function finalizeIssuedCertificate(Certificate $certificate, string $issuedCert)
     {
         $certService = app(CertificateService::class);
         $certInfo = $certService->getCertInfo($issuedCert);
         $expiry = isset($certInfo['validTo_time_t']) ? date('Y-m-d H:i:s', $certInfo['validTo_time_t']) : null;
         $issuer = $certInfo['issuer']['CN'] ?? 'Unknown';
+        $acmeType = strtolower($certificate->acme_type ?? 'dv');
+        $acmeTypeUpper = strtoupper($acmeType);
 
         $certificate->update([
             'certificate' => $issuedCert,
             'status' => 'issued',
             'request_type' => 'acme',
+            'acme_type' => $acmeType,
             'expiry_date' => $expiry,
             'issuer' => $issuer,
             'thumbprint_sha1' => $certService->extractThumbprint($issuedCert, 'sha1'),
@@ -150,7 +202,7 @@ class AcmeService
 
         $certificate->linkIssuer();
 
-        AuditLog::log('acme_fulfill_success', "Fulfilled ACME certificate for domain: {$certificate->domain->name}");
+        AuditLog::log('acme_fulfill_success', "Fulfilled ACME ({$acmeTypeUpper}) certificate for domain: {$certificate->domain->name}");
 
         $appPath = "certificates/" . $certificate->domain->name . "/" . $certificate->created_at->format('Y-m-d_H-i-s');
         Storage::disk('local')->put($appPath . "/certificate.cer", $issuedCert);
@@ -356,7 +408,17 @@ class AcmeService
         $this->lastResponse = json_decode($body, true) ?: $body;
 
         if ($httpCode >= 400) {
-            $errorDetail = is_array($this->lastResponse) ? json_encode($this->lastResponse) : $this->lastResponse;
+            if (is_array($this->lastResponse) && !empty($this->lastResponse['detail'])) {
+                $errorDetail = $this->lastResponse['detail'];
+                if (!empty($this->lastResponse['subproblems']) && is_array($this->lastResponse['subproblems'])) {
+                    $subs = array_filter(array_column($this->lastResponse['subproblems'], 'detail'));
+                    if (!empty($subs)) {
+                        $errorDetail .= ' (' . implode('; ', $subs) . ')';
+                    }
+                }
+            } else {
+                $errorDetail = is_array($this->lastResponse) ? json_encode($this->lastResponse, JSON_UNESCAPED_SLASHES) : $this->lastResponse;
+            }
             throw new Exception("ACME Server returned error {$httpCode}: {$errorDetail}");
         }
 

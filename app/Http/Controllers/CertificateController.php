@@ -237,19 +237,29 @@ class CertificateController extends Controller
     {
         $this->authorizeAccess($certificate->domain);
         
+        $validated = $request->validate([
+            'acme_type' => 'nullable|string|in:dv,ov',
+        ]);
+        $acmeType = strtolower($validated['acme_type'] ?? 'dv');
+
         $certificate->update([
             'request_type' => 'acme',
+            'acme_type' => $acmeType,
             'status' => 'pending_verification'
         ]);
 
-        AuditLog::log('acme_order_initiate', "Initiated ACME fulfillment for: {$certificate->domain->name}");
+        $acmeTypeUpper = strtoupper($acmeType);
+        AuditLog::log('acme_order_initiate', "Initiated ACME ({$acmeTypeUpper}) fulfillment for: {$certificate->domain->name}");
 
-        return response()->json(['success' => true, 'message' => 'Ready to verify via ACME service.']);
+        return response()->json(['success' => true, 'message' => "Ready to verify via ACME ({$acmeTypeUpper}) service."]);
     }
 
     public function fulfillAcme(Request $request, Certificate $certificate)
     {
         $this->authorizeAccess($certificate->domain);
+
+        @set_time_limit(360);
+        ignore_user_abort(true);
 
         try {
             $this->acmeService->issueCertificate($certificate);
@@ -257,7 +267,7 @@ class CertificateController extends Controller
             return response()->json(['success' => true, 'message' => 'Certificate issued successfully via ACME service.']);
         } catch (\Exception $e) {
             Log::error("ACME fulfill error: " . $e->getMessage());
-            return response()->json(['success' => false, 'message' => 'ACME Error: ' . $e->getMessage()], 500);
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
         }
     }
 
@@ -269,6 +279,8 @@ class CertificateController extends Controller
             'id' => $certificate->id,
             'status' => $certificate->status,
             'request_type' => $certificate->request_type,
+            'acme_type' => $certificate->acme_type,
+            'effective_acme_type' => $certificate->request_type === 'acme' ? $certificate->effective_acme_type : null,
             'created_at' => $certificate->created_at->toDateTimeString(),
             'issuer' => $certificate->issuer,
             'expiry_date' => $certificate->expiry_date ? $certificate->expiry_date->toDateTimeString() : null,

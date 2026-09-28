@@ -20,7 +20,7 @@ use Exception;
 
 class RenewDomainAcme extends Command
 {
-    protected $signature = 'certificates:renew-domain {domain : The domain name to renew} {--dry-run : Only show what would be renewed} {--force-renew : Force renewal even if not expiring soon} {--force-automation : Force triggering automations even if they might otherwise be skipped}';
+    protected $signature = 'certificates:renew-domain {domain : The domain name to renew} {--dry-run : Only show what would be renewed} {--force-renew : Force renewal even if not expiring soon} {--force-automation : Force triggering automations even if they might otherwise be skipped} {--acme-type= : Explicitly specify ACME type (dv or ov)}';
     protected $description = 'Renew ACME certificate for a specific domain.';
 
     public function handle()
@@ -87,21 +87,28 @@ class RenewDomainAcme extends Command
             $this->comment("Generating new CSR...");
             $csrData = $certService->generateRenewalCsr($latestCert);
 
+            $acmeType = strtolower($this->option('acme-type') ?: ($latestCert->acme_type ?? 'dv'));
+            if (!in_array($acmeType, ['dv', 'ov'])) {
+                $this->error("Invalid ACME type specified: '{$acmeType}'. Allowed types: dv, ov.");
+                return 1;
+            }
+
             // 2. Create new Certificate record (CSR status)
             $newCert = $domain->certificates()->create([
                 'request_type' => 'acme',
+                'acme_type' => $acmeType,
                 'status' => 'requested',
                 'csr' => $csrData['csr'],
                 'private_key' => encrypt($csrData['private_key']),
             ]);
 
             // 3. Fulfill via AcmeService
-            $this->comment("Fulfilling certificate via ACME...");
+            $this->comment("Fulfilling certificate via ACME (" . strtoupper($acmeType) . ")...");
             $acmeService = app(AcmeService::class);
             $acmeService->issueCertificate($newCert);
 
-            $this->info("Successfully renewed certificate for {$domain->name}");
-            AuditLog::log('acme_manual_renewal_success', "Successfully manually renewed certificate for domain: {$domain->name}");
+            $this->info("Successfully renewed ACME (" . strtoupper($acmeType) . ") certificate for {$domain->name}");
+            AuditLog::log('acme_manual_renewal_success', "Successfully manually renewed ACME (" . strtoupper($acmeType) . ") certificate for domain: {$domain->name}");
 
             // Send success email
             $recipientsString = Setting::where('key', 'cert_mail_recipients')->value('value') ?? '';

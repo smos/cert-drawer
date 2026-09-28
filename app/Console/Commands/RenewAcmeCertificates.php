@@ -64,9 +64,12 @@ class RenewAcmeCertificates extends Command
                 $certService = app(CertificateService::class);
                 $csrData = $certService->generateRenewalCsr($cert);
 
+                $acmeType = $cert->acme_type ?? 'dv';
+
                 // 2. Create new Certificate record (CSR status)
                 $newCert = $cert->domain->certificates()->create([
                     'request_type' => 'acme',
+                    'acme_type' => $acmeType,
                     'status' => 'requested',
                     'csr' => $csrData['csr'],
                     'private_key' => encrypt($csrData['private_key']),
@@ -76,8 +79,8 @@ class RenewAcmeCertificates extends Command
                 $acmeService = app(AcmeService::class);
                 $acmeService->issueCertificate($newCert);
 
-                $this->info("  Successfully renewed certificate for {$cert->domain->name}");
-                AuditLog::log('acme_auto_renewal_success', "Successfully auto-renewed certificate for domain: {$cert->domain->name}");
+                $this->info("  Successfully renewed ACME (" . strtoupper($acmeType) . ") certificate for {$cert->domain->name}");
+                AuditLog::log('acme_auto_renewal_success', "Successfully auto-renewed ACME (" . strtoupper($acmeType) . ") certificate for domain: {$cert->domain->name}");
 
                 // Archive the old certificate since it's now superseded
                 $cert->update(['archived_at' => now()]);

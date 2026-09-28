@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class Certificate extends Model
 {
     protected $fillable = [
-        'domain_id', 'issuer_certificate_id', 'request_type', 'csr', 'certificate', 
+        'domain_id', 'issuer_certificate_id', 'request_type', 'acme_type', 'csr', 'certificate', 
         'private_key', 'pfx_password', 'issuer', 'expiry_date', 'status',
         'thumbprint_sha1', 'thumbprint_sha256', 'metadata', 'is_ca', 'archived_at',
         'serial_number'
@@ -19,8 +19,13 @@ class Certificate extends Model
     ];
 
     protected $appends = [
-        'has_private_key', 'has_pfx_password'
+        'has_private_key', 'has_pfx_password', 'effective_acme_type'
     ];
+
+    public function getEffectiveAcmeTypeAttribute(): string
+    {
+        return strtolower($this->acme_type ?? 'dv');
+    }
 
     protected $casts = [
         'expiry_date' => 'datetime',

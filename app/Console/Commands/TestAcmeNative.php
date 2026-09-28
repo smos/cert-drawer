@@ -19,12 +19,10 @@ class TestAcmeNative extends Command
         $certificate = Certificate::findOrFail($certId);
         $settings = Setting::all()->pluck('value', 'key');
 
-        $directoryUrl = $settings['acme_url_dv'] ?? '';
-        $kid = $settings['acme_kid'] ?? '';
-        $hmac = $settings['acme_hmac'] ?? '';
-
-        if (!$directoryUrl) {
-            $this->error("ACME Directory URL not set.");
+        try {
+            $directoryUrl = app(\App\Services\AcmeService::class)->resolveDirectoryUrl($certificate, $settings->toArray());
+        } catch (\Exception $e) {
+            $this->error($e->getMessage());
             return 1;
         }
 
