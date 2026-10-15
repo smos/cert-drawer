@@ -393,6 +393,12 @@ class DomainController extends Controller
             return back()->withErrors(['error' => "Certificate with thumbprint {$thumbprint} already exists for domain {$cn}."]);
         }
 
+        if ($domain->wasRecentlyCreated === false) {
+            if (!\Illuminate\Support\Facades\Auth::user()->canAccess($domain)) {
+                return back()->withErrors(['error' => 'You do not have permission to update this domain.']);
+            }
+        }
+
         // Check if there is an open CSR for THIS domain that matches the public key
         $matchingCsr = Certificate::where('domain_id', $domain->id)
             ->where('status', 'requested')

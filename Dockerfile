@@ -28,7 +28,12 @@ RUN docker-php-ext-configure ldap --with-libdir=lib/x86_64-linux-gnu/ \
     && docker-php-ext-install pdo_mysql pdo_sqlite gd zip ldap bcmath
 
 # Enable Apache modules
-RUN a2enmod rewrite
+RUN a2enmod rewrite headers
+
+# Security hardening: disable expose_php and suppress Apache banners
+RUN echo "expose_php = Off" > /usr/local/etc/php/conf.d/security.ini \
+    && echo "ServerTokens Prod" >> /etc/apache2/apache2.conf \
+    && echo "ServerSignature Off" >> /etc/apache2/apache2.conf
 
 # Build arguments
 ARG BUILD_DATE=unknown

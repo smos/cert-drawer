@@ -569,13 +569,70 @@ subjectAltName = @alt_names
         return $this->ensurePem($derData);
     }
 
+    public function isSafePublicUrl(?string $url): bool
+    {
+        if (empty($url)) {
+            return false;
+        }
+
+        $parsed = parse_url($url);
+        if (!$parsed || empty($parsed['scheme']) || empty($parsed['host'])) {
+            return false;
+        }
+
+        // Only allow standard http / https schemes
+        $scheme = strtolower($parsed['scheme']);
+        if (!in_array($scheme, ['http', 'https'], true)) {
+            return false;
+        }
+
+        $host = strtolower($parsed['host']);
+
+        // Block loopback and cloud metadata hostnames
+        if ($host === 'localhost' || str_ends_with($host, '.localhost') || $host === 'metadata.google.internal') {
+            return false;
+        }
+
+        // Resolve host to IPs
+        $ips = filter_var($host, FILTER_VALIDATE_IP) ? [$host] : (@gethostbynamel($host) ?: []);
+        if (empty($ips)) {
+            return false;
+        }
+
+        foreach ($ips as $ip) {
+            // Check IPv4 private and reserved ranges
+            if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+                return false;
+            }
+
+            // Explicitly verify 127.0.0.0/8 and 169.254.0.0/16
+            if (str_starts_with($ip, '127.') || str_starts_with($ip, '169.254.') || str_starts_with($ip, '0.')) {
+                return false;
+            }
+
+            // Check IPv6 loopback / unique local / link local
+            if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+                $lower = strtolower($ip);
+                if ($lower === '::1' || str_starts_with($lower, 'fe80:') || str_starts_with($lower, 'fc') || str_starts_with($lower, 'fd')) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
     public function downloadAndImportIssuer(\App\Models\Certificate $cert): ?\App\Models\Certificate
     {
         $url = $this->extractAiaUrl($cert->certificate);
-        if (!$url) return null;
+        if (!$url || !$this->isSafePublicUrl($url)) {
+            return null;
+        }
 
         try {
-            $response = \Illuminate\Support\Facades\Http::withoutVerifying()->get($url);
+            $response = \Illuminate\Support\Facades\Http::withoutVerifying()
+                ->timeout(10)
+                ->get($url);
             if (!$response->successful()) return null;
 
             $pem = $this->derToPem($response->body());

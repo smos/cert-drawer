@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Route;
 Route::get('/health', [HealthController::class, 'check']);
 
 Route::get('/login', [LoginController::class, 'showLoginForm'])->name('login');
-Route::post('/login', [LoginController::class, 'login']);
+Route::post('/login', [LoginController::class, 'login'])->middleware('throttle:10,1');
 Route::post('/logout', [LoginController::class, 'logout'])->name('logout');
 
 Route::get('/setup', [SetupController::class, 'index'])->name('setup.index');
@@ -59,8 +59,8 @@ Route::middleware('auth')->group(function () {
     Route::middleware('admin:settings')->group(function () {
         Route::get('/settings', [SettingController::class, 'index'])->name('settings.index');
         Route::post('/settings', [SettingController::class, 'update'])->name('settings.update');
-        Route::post('/settings/test-email', [SettingController::class, 'testEmail'])->name('settings.test-email');
-        Route::post('/settings/test-webhook', [SettingController::class, 'testWebhook'])->name('settings.test-webhook');
+        Route::post('/settings/test-email', [SettingController::class, 'testEmail'])->middleware('throttle:5,1')->name('settings.test-email');
+        Route::post('/settings/test-webhook', [SettingController::class, 'testWebhook'])->middleware('throttle:10,1')->name('settings.test-webhook');
         Route::get('/settings/search-groups', [SettingController::class, 'searchGroups'])->name('settings.search-groups');
     });
 
@@ -96,7 +96,7 @@ Route::middleware('auth')->group(function () {
         Route::post('/automations', [\App\Http\Controllers\AutomationController::class, 'store'])->name('automations.store');
         Route::get('/automations/{automation}', [\App\Http\Controllers\AutomationController::class, 'show'])->name('automations.show');
         Route::put('/automations/{automation}', [\App\Http\Controllers\AutomationController::class, 'update'])->name('automations.update');
-        Route::post('/automations/test', [\App\Http\Controllers\AutomationController::class, 'testConnection'])->name('automations.test');
+        Route::post('/automations/test', [\App\Http\Controllers\AutomationController::class, 'testConnection'])->middleware('throttle:10,1')->name('automations.test');
         Route::post('/automations/check-cert', [\App\Http\Controllers\AutomationController::class, 'checkCertificate'])->name('automations.check-cert');
         Route::post('/automations/{automation}/run', [\App\Http\Controllers\AutomationController::class, 'run'])->name('automations.run');
         Route::post('/automations/{automation}/test', [\App\Http\Controllers\AutomationController::class, 'test'])->name('automations.test-run');
