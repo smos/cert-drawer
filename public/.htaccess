@@ -1,4 +1,12 @@
 <IfModule mod_rewrite.c>
+    # Disable directory browsing
+    Options -Indexes
+
+    # Block access to hidden files and directories (dotfiles)
+    <FilesMatch "^\.">
+        Require all denied
+    </FilesMatch>
+
     <IfModule mod_negotiation.c>
         Options -MultiViews -Indexes
     </IfModule>

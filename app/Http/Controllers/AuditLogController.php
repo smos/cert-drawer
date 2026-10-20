@@ -44,6 +44,8 @@ class AuditLogController extends Controller
                 });
             } elseif ($category === 'auth') {
                 $query->whereIn('action', ['login', 'logout', 'auth_settings_update']);
+            } elseif ($category === 'security') {
+                $query->where('action', 'like', 'security_%');
             }
         }
 

@@ -593,19 +593,28 @@ subjectAltName = @alt_names
             return false;
         }
 
+        // Allow explicitly configured internal PKI/ADCS endpoint host
+        $isTrustedInternalPkiHost = false;
+        try {
+            $adcsEndpoint = \App\Models\Setting::where('key', 'adcs_endpoint')->value('value');
+            if ($adcsEndpoint) {
+                $pkiHost = parse_url($adcsEndpoint, PHP_URL_HOST);
+                if ($pkiHost && strtolower($pkiHost) === $host) {
+                    $isTrustedInternalPkiHost = true;
+                }
+            }
+        } catch (\Exception $e) {
+            // Ignored if DB is unavailable
+        }
+
         // Resolve host to IPs
-        $ips = filter_var($host, FILTER_VALIDATE_IP) ? [$host] : (@gethostbynamel($host) ?: []);
+        $ips = $this->resolveHostIps($host);
         if (empty($ips)) {
             return false;
         }
 
         foreach ($ips as $ip) {
-            // Check IPv4 private and reserved ranges
-            if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
-                return false;
-            }
-
-            // Explicitly verify 127.0.0.0/8 and 169.254.0.0/16
+            // Always block loopback (127.0.0.0/8), cloud metadata (169.254.0.0/16), and zero-net (0.0.0.0/8)
             if (str_starts_with($ip, '127.') || str_starts_with($ip, '169.254.') || str_starts_with($ip, '0.')) {
                 return false;
             }
@@ -617,9 +626,24 @@ subjectAltName = @alt_names
                     return false;
                 }
             }
+
+            // If this host is the explicitly trusted internal PKI host, permit private IP resolution
+            if ($isTrustedInternalPkiHost) {
+                continue;
+            }
+
+            // Check IPv4 private and reserved ranges for all other hosts
+            if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+                return false;
+            }
         }
 
         return true;
+    }
+
+    public function resolveHostIps(string $host): array
+    {
+        return filter_var($host, FILTER_VALIDATE_IP) ? [$host] : (@gethostbynamel($host) ?: []);
     }
 
     public function downloadAndImportIssuer(\App\Models\Certificate $cert): ?\App\Models\Certificate

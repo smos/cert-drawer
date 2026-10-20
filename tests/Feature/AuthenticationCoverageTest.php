@@ -20,7 +20,6 @@ class AuthenticationCoverageTest extends TestCase
         'login',           // Login page & submission
         'logout',          // Logout endpoint
         'setup',           // Initial setup (only when User::count() === 0)
-        'storage/{path}',  // Signed temporary file serving
     ];
 
     /**

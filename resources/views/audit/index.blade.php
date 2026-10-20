@@ -10,6 +10,7 @@
         <a href="{{ route('audit.index', ['category' => 'entra']) }}" class="btn" style="padding: 5px 12px; font-size: 0.85rem; border-radius: 4px; text-decoration: none; background: {{ request('category') === 'entra' ? '#9b59b6' : '#ecf0f1' }}; color: {{ request('category') === 'entra' ? 'white' : '#333' }}; border: 1px solid #ddd;">Entra ID</a>
         <a href="{{ route('audit.index', ['category' => 'domain']) }}" class="btn" style="padding: 5px 12px; font-size: 0.85rem; border-radius: 4px; text-decoration: none; background: {{ request('category') === 'domain' ? '#f1c40f' : '#ecf0f1' }}; color: {{ request('category') === 'domain' ? 'white' : '#333' }}; border: 1px solid #ddd;">Domains</a>
         <a href="{{ route('audit.index', ['category' => 'auth']) }}" class="btn" style="padding: 5px 12px; font-size: 0.85rem; border-radius: 4px; text-decoration: none; background: {{ request('category') === 'auth' ? '#e67e22' : '#ecf0f1' }}; color: {{ request('category') === 'auth' ? 'white' : '#333' }}; border: 1px solid #ddd;">Auth</a>
+        <a href="{{ route('audit.index', ['category' => 'security']) }}" class="btn" style="padding: 5px 12px; font-size: 0.85rem; border-radius: 4px; text-decoration: none; background: {{ request('category') === 'security' ? '#c0392b' : '#ecf0f1' }}; color: {{ request('category') === 'security' ? 'white' : '#333' }}; border: 1px solid #ddd;">Security</a>
     </div>
 </div>
 
@@ -37,7 +38,15 @@
                             {{ str_replace('_', ' ', $log->action) }}
                         </span>
                     </td>
-                    <td style="padding: 12px 15px;">{{ $log->description }}</td>
+                    <td style="padding: 12px 15px;">
+                        {{ $log->description }}
+                        @if(!empty($log->metadata) && is_array($log->metadata))
+                            <details style="margin-top: 5px; font-size: 0.8rem; color: #666;">
+                                <summary style="cursor: pointer; color: #3498db;">Details</summary>
+                                <pre style="margin-top: 5px; padding: 6px; background: #f8f9fa; border-radius: 4px; font-size: 0.75rem; overflow-x: auto; max-width: 500px; white-space: pre-wrap;">{{ json_encode($log->metadata, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) }}</pre>
+                            </details>
+                        @endif
+                    </td>
                     <td style="padding: 12px 15px; color: #888; font-family: monospace;">{{ $log->ip_address }}</td>
                 </tr>
             @endforeach

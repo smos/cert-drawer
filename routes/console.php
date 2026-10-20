@@ -22,6 +22,7 @@ Schedule::call(function () {
     Setting::updateOrCreate(['key' => 'scheduler_last_run'], ['value' => now()->toDateTimeString()]);
 })->everyMinute();
 
+Schedule::command('security:permissions --fix')->dailyAt('00:00');
 Schedule::command('dns:monitor')->cron("0 */{$interval} * * *");
 Schedule::command('cert:monitor')->cron("0 */{$interval} * * *");
 Schedule::command('certificates:archive')->dailyAt('01:00');

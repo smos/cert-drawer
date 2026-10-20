@@ -87,4 +87,52 @@ class SsrfProtectionTest extends TestCase
         $this->assertNull($result);
         Http::assertNothingSent();
     }
+
+    public function test_allows_configured_internal_pki_endpoint_host(): void
+    {
+        // Use a generic private IP to test that the configured ADCS endpoint is permitted
+        \App\Models\Setting::updateOrCreate(
+            ['key' => 'adcs_endpoint'],
+            ['value' => 'https://10.20.30.40/certsrv']
+        );
+
+        $this->assertTrue($this->service->isSafePublicUrl('http://10.20.30.40/CertEnroll/ca.crt'));
+        $this->assertTrue($this->service->isSafePublicUrl('https://10.20.30.40/pki/RootCA.crt'));
+
+        // Any other unconfigured internal private IP must still be blocked
+        $this->assertFalse($this->service->isSafePublicUrl('http://10.0.0.1/ca.crt'));
+    }
+
+    public function test_allows_configured_internal_pki_hostname_with_private_resolution(): void
+    {
+        // Use an RFC 2606 reserved example domain for testing
+        \App\Models\Setting::updateOrCreate(
+            ['key' => 'adcs_endpoint'],
+            ['value' => 'https://pki.example.internal/certsrv']
+        );
+
+        $mockService = $this->getMockBuilder(CertificateService::class)
+            ->onlyMethods(['resolveHostIps'])
+            ->getMock();
+
+        $mockService->method('resolveHostIps')
+            ->willReturnMap([
+                ['pki.example.internal', ['10.20.30.40']],
+                ['untrusted.example.internal', ['10.20.30.50']],
+                ['metadata.example.internal', ['169.254.169.254']],
+            ]);
+
+        // Allowed: configured PKI host resolving to private IP
+        $this->assertTrue($mockService->isSafePublicUrl('http://pki.example.internal/CertEnroll/ca.crt'));
+
+        // Blocked: unconfigured host resolving to private IP
+        $this->assertFalse($mockService->isSafePublicUrl('http://untrusted.example.internal/ca.crt'));
+
+        // Blocked: even if configured, metadata IP is strictly rejected
+        \App\Models\Setting::updateOrCreate(
+            ['key' => 'adcs_endpoint'],
+            ['value' => 'https://metadata.example.internal/certsrv']
+        );
+        $this->assertFalse($mockService->isSafePublicUrl('http://metadata.example.internal/latest/meta-data/'));
+    }
 }

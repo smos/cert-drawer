@@ -59,6 +59,8 @@ if [ -z "$APP_KEY" ]; then
         NEW_KEY=$(php artisan key:generate --show --no-ansi)
         mkdir -p "$DB_DIR"
         echo "$NEW_KEY" > "$KEY_FILE"
+        chmod 600 "$KEY_FILE"
+        chown www-data:www-data "$KEY_FILE"
         export APP_KEY="$NEW_KEY"
         echo "New APP_KEY generated and persisted to $KEY_FILE"
     fi
@@ -69,6 +71,7 @@ if [ ! -f "$DB_PATH" ]; then
     echo "Creating initial database at $DB_PATH..."
     mkdir -p "$DB_DIR"
     touch "$DB_PATH"
+    chmod 660 "$DB_PATH"
     chown www-data:www-data "$DB_PATH"
     
     # Run migrations and seed for the first time
@@ -81,8 +84,24 @@ else
     php artisan migrate --force
 fi
 
-# Ensure storage is writable
+# Ensure storage and database have proper permissions and ownership
 chown -R www-data:www-data /var/www/html/storage /var/www/html/database
+
+# Audit and enforce secure permissions with audit logging
+echo "Auditing and securing filesystem permissions..."
+php artisan security:permissions --fix || true
+
+# Secure database directory and application key
+chmod 750 "$DB_DIR"
+[ -f "$DB_PATH" ] && chmod 660 "$DB_PATH"
+[ -f "$KEY_FILE" ] && chmod 600 "$KEY_FILE"
+
+# Restrict sensitive storage files
+find /var/www/html/storage -type d -exec chmod 750 {} + 2>/dev/null || true
+find /var/www/html/storage -type f -exec chmod 640 {} + 2>/dev/null || true
+find /var/www/html/storage/app/private -type d -exec chmod 700 {} + 2>/dev/null || true
+find /var/www/html/storage/app/private -type f -exec chmod 600 {} + 2>/dev/null || true
+find /var/www/html/storage/app -name "*.pem" -o -name "*.key" -exec chmod 600 {} + 2>/dev/null || true
 
 # Start the main process
 echo "Starting Apache..."
