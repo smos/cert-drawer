@@ -95,7 +95,7 @@ LH6wYZxlExtMsrnyDq/FOpGCtOjCnCHxwJY8AY8P/IRAFkBqiEk7
 
         $response->assertStatus(200);
         $response->assertJsonPath('success', true);
-        $response->assertJsonFragment(['cert_name' => 'auto_test_com']);
+        $response->assertJsonFragment(['cert_name' => "auto_test_com_{$cert->id}"]);
         // Verify it contains the warning about incomplete chain
         $this->assertStringContainsString('incomplete chain', $response->json('message'));
     }
@@ -135,5 +135,248 @@ LH6wYZxlExtMsrnyDq/FOpGCtOjCnCHxwJY8AY8P/IRAFkBqiEk7
         
         $automation = Automation::where('domain_id', $domain->id)->where('type', 'paloalto')->first();
         $this->assertEquals('', $automation->config['profiles_string']);
+    }
+
+    public function test_kemp_service_deploy_uploads_versioned_cert_and_updates_referring_virtual_services()
+    {
+        $domain = Domain::create(['name' => 'kemptest.nl']);
+        
+        // Generate an RSA private key
+        $res = openssl_pkey_new(['private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA]);
+        openssl_pkey_export($res, $pkey);
+
+        // Old cert (expired)
+        $oldCert = Certificate::create([
+            'domain_id' => $domain->id,
+            'status' => 'issued',
+            'request_type' => 'manual',
+            'certificate' => 'dummy-old-cert',
+            'private_key' => encrypt($pkey),
+            'expiry_date' => now()->subDays(5), // expired
+        ]);
+
+        // New cert
+        $newCert = Certificate::create([
+            'domain_id' => $domain->id,
+            'status' => 'issued',
+            'request_type' => 'manual',
+            'certificate' => 'dummy-new-cert',
+            'private_key' => encrypt($pkey),
+            'expiry_date' => now()->addDays(90),
+        ]);
+
+        $oldCertName = "auto_kemptest_nl_{$oldCert->id}";
+        $newCertName = "auto_kemptest_nl_{$newCert->id}";
+
+        \Illuminate\Support\Facades\Http::fake(function ($request) use ($oldCertName, $newCertName) {
+            $data = $request->data();
+            $cmd = $data['cmd'] ?? '';
+
+            if ($cmd === 'listcert') {
+                return \Illuminate\Support\Facades\Http::response([
+                    'status' => 'ok',
+                    'cert' => [
+                        ['name' => $oldCertName],
+                    ]
+                ], 200);
+            }
+
+            if ($cmd === 'addcert') {
+                return \Illuminate\Support\Facades\Http::response([
+                    'status' => 'ok',
+                    'message' => 'Certificate uploaded',
+                ], 200);
+            }
+
+            if ($cmd === 'listvs') {
+                return \Illuminate\Support\Facades\Http::response([
+                    'status' => 'ok',
+                    'VS' => [
+                        [
+                            'Index' => 101,
+                            'NickName' => 'App Web VS',
+                            'CertFile' => $oldCertName, // Referring to old version!
+                        ],
+                        [
+                            'Index' => 102,
+                            'NickName' => 'Unrelated VS',
+                            'CertFile' => 'other_cert',
+                        ]
+                    ]
+                ], 200);
+            }
+
+            if ($cmd === 'modvs') {
+                return \Illuminate\Support\Facades\Http::response([
+                    'status' => 'ok',
+                    'message' => 'VS modified',
+                ], 200);
+            }
+
+            if ($cmd === 'delcert') {
+                return \Illuminate\Support\Facades\Http::response([
+                    'status' => 'ok',
+                    'message' => 'Cert deleted',
+                ], 200);
+            }
+
+            return \Illuminate\Support\Facades\Http::response(['status' => 'ok'], 200);
+        });
+
+        $automation = Automation::create([
+            'domain_id' => $domain->id,
+            'type' => 'kemp',
+            'hostname' => 'kemp.test.local',
+            'password' => 'test-key',
+            'config' => ['mode' => 'auto_discovery'],
+        ]);
+
+        $service = app(KempService::class);
+        $result = $service->deploy($automation, $newCert);
+
+        $this->assertTrue($result);
+
+        // Verify addcert was called with new versioned name
+        \Illuminate\Support\Facades\Http::assertSent(function ($request) use ($newCertName) {
+            return ($request->data()['cmd'] ?? '') === 'addcert' &&
+                   ($request->data()['cert'] ?? '') === $newCertName;
+        });
+
+        // Verify modvs was called for VS 101 with CertFile = new versioned name
+        \Illuminate\Support\Facades\Http::assertSent(function ($request) use ($newCertName) {
+            return ($request->data()['cmd'] ?? '') === 'modvs' &&
+                   ($request->data()['vs'] ?? null) == 101 &&
+                   ($request->data()['CertFile'] ?? '') === $newCertName;
+        });
+
+        // Verify modvs was NOT called for unrelated VS 102
+        \Illuminate\Support\Facades\Http::assertNotSent(function ($request) {
+            return ($request->data()['cmd'] ?? '') === 'modvs' &&
+                   ($request->data()['vs'] ?? null) == 102;
+        });
+    }
+
+    public function test_kemp_service_check_status_identifies_outdated_virtual_services()
+    {
+        $domain = Domain::create(['name' => 'statuskemp.nl']);
+        $res = openssl_pkey_new(['private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA]);
+        openssl_pkey_export($res, $pkey);
+
+        $cert = Certificate::create([
+            'domain_id' => $domain->id,
+            'status' => 'issued',
+            'request_type' => 'manual',
+            'certificate' => 'dummy-cert',
+            'private_key' => encrypt($pkey),
+            'expiry_date' => now()->addDays(90),
+            'thumbprint_sha256' => 'thumb123',
+        ]);
+
+        $expectedCertName = "auto_statuskemp_nl_{$cert->id}";
+
+        $automation = Automation::create([
+            'domain_id' => $domain->id,
+            'type' => 'kemp',
+            'hostname' => 'kemp.test.local',
+            'password' => 'test-key',
+            'config' => ['mode' => 'auto_discovery'],
+        ]);
+
+        \Illuminate\Support\Facades\Http::fake(function ($request) use ($expectedCertName) {
+            $cmd = $request->data()['cmd'] ?? '';
+            if ($cmd === 'readcert') {
+                return \Illuminate\Support\Facades\Http::response([
+                    'status' => 'ok',
+                    'certificate' => 'dummy-cert'
+                ], 200);
+            }
+            if ($cmd === 'listvs') {
+                return \Illuminate\Support\Facades\Http::response([
+                    'status' => 'ok',
+                    'VS' => [
+                        [
+                            'Index' => 201,
+                            'NickName' => 'Outdated VS',
+                            'CertFile' => 'auto_statuskemp_nl_old', // Older version
+                        ],
+                        [
+                            'Index' => 202,
+                            'NickName' => 'Updated VS',
+                            'CertFile' => $expectedCertName, // Matches new cert
+                        ]
+                    ]
+                ], 200);
+            }
+            return \Illuminate\Support\Facades\Http::response(['status' => 'ok'], 200);
+        });
+
+        $service = app(KempService::class);
+        $status = $service->checkStatus($automation, $cert);
+
+        $this->assertTrue($status['exists_on_device']);
+        $this->assertTrue($status['needs_update']); // Because VS 201 is outdated
+        $this->assertCount(2, $status['details']['virtual_services']);
+        $this->assertFalse($status['details']['virtual_services'][0]['up_to_date']);
+        $this->assertTrue($status['details']['virtual_services'][1]['up_to_date']);
+    }
+
+    public function test_kemp_service_cleanup_does_not_delete_currently_deploying_or_latest_cert_even_if_expired()
+    {
+        $domain = Domain::create(['name' => 'expiredtest.nl']);
+        $res = openssl_pkey_new(['private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA]);
+        openssl_pkey_export($res, $pkey);
+
+        // Certificate is expired in local DB
+        $cert = Certificate::create([
+            'domain_id' => $domain->id,
+            'status' => 'issued',
+            'request_type' => 'manual',
+            'certificate' => 'dummy-cert',
+            'private_key' => encrypt($pkey),
+            'expiry_date' => now()->subDays(10), // expired!
+            'thumbprint_sha256' => 'thumb123',
+        ]);
+
+        $certName = "auto_expiredtest_nl_{$cert->id}";
+
+        $automation = Automation::create([
+            'domain_id' => $domain->id,
+            'type' => 'kemp',
+            'hostname' => 'kemp.test.local',
+            'password' => 'test-key',
+            'config' => ['mode' => 'auto_discovery'],
+        ]);
+
+        \Illuminate\Support\Facades\Http::fake(function ($request) use ($certName) {
+            $cmd = $request->data()['cmd'] ?? '';
+            if ($cmd === 'listcert') {
+                return \Illuminate\Support\Facades\Http::response([
+                    'status' => 'ok',
+                    'cert' => [
+                        ['name' => $certName],
+                    ]
+                ], 200);
+            }
+            if ($cmd === 'addcert') {
+                return \Illuminate\Support\Facades\Http::response(['status' => 'ok'], 200);
+            }
+            if ($cmd === 'listvs') {
+                // No virtual services bound
+                return \Illuminate\Support\Facades\Http::response(['status' => 'ok', 'VS' => []], 200);
+            }
+            if ($cmd === 'delcert') {
+                return \Illuminate\Support\Facades\Http::response(['status' => 'ok'], 200);
+            }
+            return \Illuminate\Support\Facades\Http::response(['status' => 'ok'], 200);
+        });
+
+        $service = app(KempService::class);
+        $service->deploy($automation, $cert);
+
+        // Ensure delcert was NOT called for this cert
+        \Illuminate\Support\Facades\Http::assertNotSent(function ($request) use ($certName) {
+            return ($request->data()['cmd'] ?? '') === 'delcert' &&
+                   ($request->data()['cert'] ?? '') === $certName;
+        });
     }
 }

@@ -130,6 +130,10 @@ class AutomationController extends Controller
                 $service = app(KempService::class);
                 $certs = $service->listCerts($tempAuto);
                 
+                $latestCert = $domain->certificates()->where('status', 'issued')->latest()->first();
+                $safeName = str_replace(['*', '.'], ['wildcard', '_'], $domain->name);
+                $certName = $latestCert ? "auto_{$safeName}_{$latestCert->id}" : "auto_{$safeName}";
+
                 $exists = false;
                 foreach ($certs as $c) {
                     if (($c['name'] ?? '') === $certName) {
@@ -138,9 +142,6 @@ class AutomationController extends Controller
                     }
                 }
 
-                $details = $exists ? $service->getCert($tempAuto, $certName) : null;
-
-                $latestCert = $domain->certificates()->where('status', 'issued')->latest()->first();
                 $chainWarning = "";
                 if ($latestCert) {
                     $details = app(CertificateController::class)->show($latestCert)->getData();
@@ -153,7 +154,7 @@ class AutomationController extends Controller
                     'success' => true,
                     'exists' => $exists,
                     'cert_name' => $certName,
-                    'message' => ($exists ? "Certificate '{$certName}' already exists on device." : "Certificate '{$certName}' not found on device. It will be created.") . $chainWarning
+                    'message' => ($exists ? "Certificate '{$certName}' already exists on Kemp." : "Certificate '{$certName}' not found on Kemp. It will be uploaded and attached to matching Virtual Services.") . $chainWarning
                 ]);
             }
 

@@ -41,6 +41,19 @@ class KempDeployTest extends Command
             $this->info("Attempting deployment via KempService...");
             $kempService->deploy($automation, $latestCert);
             $this->info("Deployment SUCCESSFUL!");
+
+            $this->info("\nChecking device status after deployment...");
+            $status = $kempService->checkStatus($automation, $latestCert);
+            $this->line("Status Message: " . ($status['message'] ?? 'N/A'));
+            $this->line("Needs Update: " . ($status['needs_update'] ? 'YES' : 'NO'));
+
+            if (!empty($status['details']['virtual_services'])) {
+                $this->info("\nVirtual Services Status:");
+                foreach ($status['details']['virtual_services'] as $vs) {
+                    $indicator = $vs['up_to_date'] ? '✓' : '✗';
+                    $this->line(" [{$indicator}] VS #{$vs['index']} ({$vs['name']}) -> Cert: {$vs['current_cert']}");
+                }
+            }
         } catch (\Exception $e) {
             $this->error("Deployment FAILED: " . $e->getMessage());
             

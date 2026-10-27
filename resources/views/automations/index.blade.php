@@ -93,7 +93,8 @@
                     <td style="padding: 12px 15px;">{{ $auto->hostname }}</td>
                     <td style="padding: 12px 15px; font-family: monospace; font-size: 0.8rem;">
                         @if($auto->type === 'kemp')
-                            Cert Name: auto_{{ str_replace('*', 'wildcard', str_replace('.', '_', $auto->domain->name)) }}
+                            Cert: auto_{{ str_replace('*', 'wildcard', str_replace('.', '_', $auto->domain->name)) }}_&lt;id&gt;
+                            <br><small style="color: #7f8c8d;">Auto-discovers matching VS</small>
                         @elseif($auto->type === 'fortigate')
                             Roles: 
                             @php
@@ -346,9 +347,9 @@
         if (type === 'kemp') {
             pwdLabel.innerText = 'API Key / Password';
             html = `
-                <div style="margin-bottom:15px">
-                    <label>VS Index (Integer, 0 for first VS matching hostname)</label><br>
-                    <input type="number" name="config[vs_index]" value="0" required style="width:100%; padding:8px; border:1px solid #ddd;">
+                <input type="hidden" name="config[mode]" value="auto_discovery">
+                <div style="margin-bottom:15px; background: #e8f4fd; padding: 10px; border-radius: 4px; border-left: 4px solid #3498db; font-size: 0.85rem; color: #2c3e50;">
+                    ℹ️ <strong>Auto-Discovery Enabled:</strong> Certificates are uploaded as <code>auto_&lt;domain&gt;_&lt;id&gt;</code> and automatically attached to all Virtual Services referencing this certificate naming method. Expired previous certificates are automatically pruned once unbound.
                 </div>
             `;
         } else if (type === 'fortigate') {
@@ -394,7 +395,7 @@
                 
                 // Fill extra fields
                 if (auto.type === 'kemp') {
-                    document.querySelector('[name="config[vs_index]"]').value = auto.config.vs_index || 0;
+                    // Auto-discovery mode: no extra fields required
                 } else if (auto.type === 'fortigate') {
                     document.querySelector('[name="config[port]"]').value = auto.config.port || 443;
                     document.querySelector('[name="config[roles][vpn_ssl]"]').checked = !!auto.config.roles?.vpn_ssl;
