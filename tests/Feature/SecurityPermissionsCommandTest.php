@@ -111,4 +111,76 @@ class SecurityPermissionsCommandTest extends TestCase
         $response->assertSee('Corrected file permissions on test paths');
         $response->assertDontSee('Added domain test.example.internal');
     }
+
+    public function test_storage_disk_creates_sensitive_files_with_strict_private_permissions(): void
+    {
+        $domainName = 'permission-test.example.internal';
+        $timestamp = '2026-11-09_12-00-00';
+        $folder = "certificates/{$domainName}/{$timestamp}";
+
+        try {
+            \Illuminate\Support\Facades\Storage::disk('local')->put("{$folder}/request.csr", 'dummy-csr-data');
+            \Illuminate\Support\Facades\Storage::disk('local')->put("{$folder}/certificate.cer", 'dummy-cert-data');
+            \Illuminate\Support\Facades\Storage::disk('local')->put("{$folder}/ssl.conf", 'dummy-conf-data');
+
+            $csrPath = storage_path("app/private/{$folder}/request.csr");
+            $cerPath = storage_path("app/private/{$folder}/certificate.cer");
+            $confPath = storage_path("app/private/{$folder}/ssl.conf");
+            $timestampDir = storage_path("app/private/{$folder}");
+            $domainDir = storage_path("app/private/certificates/{$domainName}");
+
+            clearstatcache();
+
+            $this->assertEquals('0600', sprintf('%04o', fileperms($csrPath) & 0777));
+            $this->assertEquals('0600', sprintf('%04o', fileperms($cerPath) & 0777));
+            $this->assertEquals('0600', sprintf('%04o', fileperms($confPath) & 0777));
+            $this->assertEquals('0700', sprintf('%04o', fileperms($timestampDir) & 0777));
+            $this->assertEquals('0700', sprintf('%04o', fileperms($domainDir) & 0777));
+
+            // Permission audit should report everything clean without fixing
+            $this->artisan('security:permissions')
+                ->expectsOutputToContain('All audited sensitive file and directory permissions are secure.')
+                ->assertSuccessful();
+        } finally {
+            \Illuminate\Support\Facades\Storage::disk('local')->deleteDirectory("certificates/{$domainName}");
+        }
+    }
+
+    public function test_generate_csr_endpoint_creates_request_csr_with_strict_private_permissions(): void
+    {
+        $user = User::factory()->create([
+            'email' => 'admin@example.internal',
+        ]);
+        $domain = \App\Models\Domain::create([
+            'name' => 'csr-perm-test.example.internal',
+            'enabled' => true,
+        ]);
+
+        try {
+            $response = $this->actingAs($user)->postJson(route('domains.initiate-request', $domain), [
+                'csr_option' => 'auto',
+            ]);
+
+            $response->assertOk();
+            $response->assertJson(['success' => true]);
+
+            $certificate = $domain->certificates()->latest()->first();
+            $this->assertNotNull($certificate);
+
+            $folder = "certificates/{$domain->name}/" . $certificate->created_at->format('Y-m-d_H-i-s');
+            $csrPath = storage_path("app/private/{$folder}/request.csr");
+
+            clearstatcache(true, $csrPath);
+            $this->assertFileExists($csrPath);
+            $this->assertEquals('0600', sprintf('%04o', fileperms($csrPath) & 0777));
+            $this->assertEquals('0700', sprintf('%04o', fileperms(dirname($csrPath)) & 0777));
+
+            // Audit command should report clean
+            $this->artisan('security:permissions')
+                ->expectsOutputToContain('All audited sensitive file and directory permissions are secure.')
+                ->assertSuccessful();
+        } finally {
+            \Illuminate\Support\Facades\Storage::disk('local')->deleteDirectory("certificates/{$domain->name}");
+        }
+    }
 }

@@ -36,6 +36,8 @@ return [
             'serve' => false,
             'throw' => false,
             'report' => false,
+            'visibility' => 'private',
+            'directory_visibility' => 'private',
             'permissions' => [
                 'file' => [
                     'public' => 0644,
