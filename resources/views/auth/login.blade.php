@@ -4,6 +4,12 @@
 <div style="max-width: 400px; margin: 100px auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
     <h2 style="text-align: center; margin-bottom: 30px;">Sign In</h2>
     
+    @if(request()->has('expired'))
+        <div style="background: #fff3cd; color: #856404; padding: 12px; border-radius: 4px; margin-bottom: 20px; font-size: 0.9rem; border: 1px solid #ffeeba;">
+            Your session has expired due to inactivity. Please sign in again.
+        </div>
+    @endif
+
     @if($errors->any())
         <div style="background: #f8d7da; color: #721c24; padding: 10px; border-radius: 4px; margin-bottom: 20px; font-size: 0.9rem;">
             {{ $errors->first() }}

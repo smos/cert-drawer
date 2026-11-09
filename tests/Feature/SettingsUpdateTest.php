@@ -72,4 +72,49 @@ class SettingsUpdateTest extends TestCase
         $response->assertRedirect(route('settings.index'));
         $this->assertEquals('0', Setting::where('key', 'notify_connection_issues')->value('value'));
     }
+
+    public function test_general_settings_update_saves_session_lifetime_and_updates_config()
+    {
+        $user = User::factory()->create();
+
+        $response = $this->actingAs($user)->withoutMiddleware()->post(route('settings.update'), [
+            'session_lifetime' => '45',
+        ]);
+        $response->assertRedirect(route('settings.index'));
+        $this->assertEquals('45', Setting::where('key', 'session_lifetime')->value('value'));
+
+        (new \App\Providers\AppServiceProvider(app()))->bootSessionConfiguration();
+        $this->assertEquals(45, config('session.lifetime'));
+    }
+
+    public function test_settings_update_validates_session_lifetime()
+    {
+        $user = User::factory()->create();
+
+        $response = $this->actingAs($user)->withoutMiddleware()->post(route('settings.update'), [
+            'session_lifetime' => '-5',
+        ]);
+        $response->assertSessionHasErrors(['session_lifetime']);
+    }
+
+    public function test_migration_sets_default_session_lifetime_if_not_exists()
+    {
+        Setting::where('key', 'session_lifetime')->delete();
+        $this->assertNull(Setting::where('key', 'session_lifetime')->value('value'));
+
+        $migration = require database_path('migrations/2026_11_09_120000_set_default_session_lifetime_setting.php');
+        $migration->up();
+
+        $this->assertEquals('30', Setting::where('key', 'session_lifetime')->value('value'));
+    }
+
+    public function test_migration_preserves_existing_session_lifetime_on_upgrade()
+    {
+        Setting::updateOrCreate(['key' => 'session_lifetime'], ['value' => '60']);
+
+        $migration = require database_path('migrations/2026_11_09_120000_set_default_session_lifetime_setting.php');
+        $migration->up();
+
+        $this->assertEquals('60', Setting::where('key', 'session_lifetime')->value('value'));
+    }
 }

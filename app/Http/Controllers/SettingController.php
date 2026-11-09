@@ -97,6 +97,12 @@ class SettingController extends Controller
 
     public function update(Request $request)
     {
+        if ($request->filled('session_lifetime')) {
+            $request->validate([
+                'session_lifetime' => 'integer|min:1|max:10080',
+            ]);
+        }
+
         foreach ($request->except(['_token']) as $key => $value) {
             if (in_array($key, [
                 'acme_hmac', 'mail_password', 'poller_api_key', 

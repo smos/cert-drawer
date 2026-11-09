@@ -14,8 +14,18 @@ use Illuminate\Support\Str;
 
 class LoginController extends Controller
 {
-    public function showLoginForm()
+    public function showLoginForm(Request $request)
     {
+        if ($request->has('expired') && Auth::check()) {
+            $user = Auth::user();
+            if ($user) {
+                AuditLog::log('logout', "Session expired due to inactivity for: {$user->email}");
+            }
+            Auth::logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+        }
+
         return view('auth.login');
     }
 

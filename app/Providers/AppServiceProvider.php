@@ -33,6 +33,23 @@ class AppServiceProvider extends ServiceProvider
 
         $this->bootLdapConfiguration();
         $this->bootMailConfiguration();
+        $this->bootSessionConfiguration();
+    }
+
+    public function bootSessionConfiguration(): void
+    {
+        try {
+            if (!Schema::hasTable('settings')) {
+                return;
+            }
+        } catch (\Throwable $e) {
+            return;
+        }
+
+        $sessionLifetime = Setting::where('key', 'session_lifetime')->value('value');
+        if (!empty($sessionLifetime) && is_numeric($sessionLifetime) && (int) $sessionLifetime > 0) {
+            Config::set('session.lifetime', (int) $sessionLifetime);
+        }
     }
 
     public function bootMailConfiguration(): void

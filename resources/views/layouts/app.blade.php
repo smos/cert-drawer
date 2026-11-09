@@ -214,7 +214,7 @@
                 <div style="font-weight: 600; margin-bottom: 15px;">{{ Auth::user()->name }}</div>
                 <form action="{{ route('logout') }}" method="POST">
                     @csrf
-                    <button type="submit" class="btn btn-sm" style="width: 100%; background: #c0392b; color: white;">Logout</button>
+                    <button type="submit" onclick="localStorage.removeItem('certdrawer_last_activity')" class="btn btn-sm" style="width: 100%; background: #c0392b; color: white;">Logout</button>
                 </form>
                 <div style="font-size: 0.7rem; color: #666; margin-top: 15px; text-align: center;">
                     Build: {{ config('app.build_date') }}
@@ -1646,5 +1646,70 @@
         }
 
     </script>
+
+    @auth
+    <script>
+        (function() {
+            const sessionLifetimeMs = {{ (int) config('session.lifetime', 30) }} * 60 * 1000;
+            const loginUrl = "{{ route('login') }}?expired=1";
+            const STORAGE_KEY = 'certdrawer_last_activity';
+
+            function updateActivity() {
+                localStorage.setItem(STORAGE_KEY, Date.now().toString());
+            }
+
+            function checkSessionTimeout() {
+                const storedTime = localStorage.getItem(STORAGE_KEY);
+                if (!storedTime) {
+                    return;
+                }
+
+                const lastActivity = parseInt(storedTime, 10);
+                const elapsed = Date.now() - lastActivity;
+
+                if (elapsed >= sessionLifetimeMs) {
+                    localStorage.removeItem(STORAGE_KEY);
+                    window.location.href = loginUrl;
+                }
+            }
+
+            // Record initial activity
+            updateActivity();
+
+            // Throttle activity event listeners so we do not spam localStorage on rapid interactions
+            let throttleTimer = null;
+            ['mousedown', 'keydown', 'scroll', 'touchstart'].forEach(function(evt) {
+                window.addEventListener(evt, function() {
+                    if (!throttleTimer) {
+                        updateActivity();
+                        throttleTimer = setTimeout(function() {
+                            throttleTimer = null;
+                        }, 5000);
+                    }
+                }, { passive: true });
+            });
+
+            // Periodically check timeout every 10 seconds
+            setInterval(checkSessionTimeout, 10000);
+
+            // Immediate checks when user returns to this tab or tab gains focus
+            document.addEventListener('visibilitychange', function() {
+                if (document.visibilityState === 'visible') {
+                    checkSessionTimeout();
+                }
+            });
+            window.addEventListener('focus', function() {
+                checkSessionTimeout();
+            });
+
+            // React if another tab logged out or cleared the session activity
+            window.addEventListener('storage', function(e) {
+                if (e.key === STORAGE_KEY && !e.newValue) {
+                    checkSessionTimeout();
+                }
+            });
+        })();
+    </script>
+    @endauth
 </body>
 </html>

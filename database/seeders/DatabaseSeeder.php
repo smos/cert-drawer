@@ -20,6 +20,9 @@ class DatabaseSeeder extends Seeder
             'expiry_orange' => '20',
             'expiry_red' => '10',
             
+            // Session Security
+            'session_lifetime' => '30',
+            
             // CSR Default DN Template
             'dn_country' => 'NL',
             'dn_state' => 'State',

@@ -16,6 +16,12 @@ class AuthController extends Controller
 
     public function update(Request $request)
     {
+        if ($request->filled('session_lifetime')) {
+            $request->validate([
+                'session_lifetime' => 'integer|min:1|max:10080',
+            ]);
+        }
+
         // Handle the allowed groups array specifically
         $allowedGroups = $request->input('ldap_allowed_groups', []);
         Setting::updateOrCreate(['key' => 'ldap_allowed_groups'], ['value' => json_encode($allowedGroups)]);

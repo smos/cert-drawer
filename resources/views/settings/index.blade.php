@@ -18,6 +18,20 @@
 <form action="{{ route('settings.update') }}" method="POST" id="settings-form">
     @csrf
     
+    <h3>Session & Security</h3>
+    <div style="margin-bottom:20px; background: #fff; border: 1px solid #ddd; padding: 15px; border-radius: 8px;">
+        <label style="font-weight: 600;">Session Inactivity Timeout (Minutes)</label><br>
+        <p style="font-size: 0.85rem; color: #666; margin-top: 4px; margin-bottom: 10px;">
+            Number of minutes of inactivity before an idle user session expires and automatically redirects to the sign-in screen.
+        </p>
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <input type="number" name="session_lifetime" min="1" max="10080" value="{{ $settings['session_lifetime'] ?? config('session.lifetime', 30) }}" style="width:160px; padding:8px; border:1px solid #ddd; border-radius: 4px;">
+            <span style="color: #666; font-size: 0.9rem;">minutes (default: 30)</span>
+        </div>
+    </div>
+
+    <hr>
+
     <h3>ADCS Integration</h3>
     <div style="margin-bottom:15px">
         <label>ADCS Endpoint URL</label><br>

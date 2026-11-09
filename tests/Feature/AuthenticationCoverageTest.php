@@ -114,4 +114,57 @@ class AuthenticationCoverageTest extends TestCase
         ]);
         $response->assertRedirect('/');
     }
+
+    /**
+     * Test that the login page displays the inactivity expiration notice when requested.
+     */
+    public function test_login_page_displays_session_expired_message(): void
+    {
+        $response = $this->get('/login?expired=1');
+        $response->assertStatus(200);
+        $response->assertSee('Your session has expired due to inactivity. Please sign in again.');
+    }
+
+    /**
+     * Test that an authenticated user navigating to login with expired=1 is logged out cleanly.
+     */
+    public function test_authenticated_user_hitting_login_with_expired_flag_is_logged_out(): void
+    {
+        $user = User::factory()->create();
+
+        $this->actingAs($user);
+        $this->assertAuthenticatedAs($user);
+
+        $response = $this->get('/login?expired=1');
+        $response->assertStatus(200);
+        $this->assertGuest();
+
+        $this->assertDatabaseHas('audit_logs', [
+            'action' => 'logout',
+            'description' => "Session expired due to inactivity for: {$user->email}",
+        ]);
+    }
+
+    /**
+     * Test that authenticated pages include the background session inactivity script.
+     */
+    public function test_authenticated_pages_include_inactivity_tracker_script(): void
+    {
+        $user = User::factory()->create();
+
+        $response = $this->actingAs($user)->get('/');
+        $response->assertStatus(200);
+        $response->assertSee('certdrawer_last_activity');
+        $response->assertSee('checkSessionTimeout');
+    }
+
+    /**
+     * Test that guest pages do not include the background session inactivity script.
+     */
+    public function test_guest_pages_do_not_include_inactivity_tracker_script(): void
+    {
+        $guestResponse = $this->get('/login');
+        $guestResponse->assertStatus(200);
+        $guestResponse->assertDontSee('certdrawer_last_activity');
+    }
 }
