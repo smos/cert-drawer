@@ -97,7 +97,7 @@ class PaloAltoService
 
         // 3. Cleanup old/expired certificates for this domain
         try {
-            $this->cleanupExpiredCerts($automation, $certificate->domain->name);
+            $this->cleanupExpiredCerts($automation, $certificate->domain->name, $certName);
         } catch (Exception $e) {
             // Cleanup failure is a warning, not a critical error
             Log::warning("Palo Alto Cleanup failed: " . $e->getMessage());
@@ -294,6 +294,7 @@ class PaloAltoService
         // Consistent naming convention: auto_domain_id
         $safeName = str_replace(['*', '.'], ['wildcard', '_'], $domainName);
         $oldCertPrefix = "auto_{$safeName}_";
+        $legacyName = "auto_{$safeName}";
 
         // Fetch all decryption rules
         $xpath = "/config/devices/entry[@name='localhost.localdomain']/vsys/entry[@name='vsys1']/rulebase/decryption/rules";
@@ -328,7 +329,7 @@ class PaloAltoService
             if (isset($rule->type->{'ssl-forward-proxy'}->certificate)) {
                 $isForwardProxy = true;
                 $currentCert = (string)$rule->type->{'ssl-forward-proxy'}->certificate;
-                if (str_starts_with($currentCert, $oldCertPrefix)) {
+                if (str_starts_with($currentCert, $oldCertPrefix) || $currentCert === $legacyName) {
                     $isManaged = true;
                 }
             } 
@@ -337,7 +338,7 @@ class PaloAltoService
                 foreach ($rule->type->{'ssl-inbound-inspection'}->certificates->member as $member) {
                     $mName = (string)$member;
                     $existingMembers[] = $mName;
-                    if (str_starts_with($mName, $oldCertPrefix)) {
+                    if (str_starts_with($mName, $oldCertPrefix) || $mName === $legacyName) {
                          $isManaged = true;
                     }
                 }
@@ -363,13 +364,19 @@ class PaloAltoService
                         $this->executeSet($setUrl, $key, $ruleName, $errors);
                     }
 
-                    // Cleanup old members from the rule
+                    // Lazy removal: Only remove old members from the rule if they are actually expired.
+                    // Valid unexpired certificates are retained to provide a seamless overlap period.
                     foreach ($existingMembers as $member) {
-                        if (str_starts_with($member, $oldCertPrefix) && $member !== $newCertName) {
-                            Log::info("Removing old certificate '{$member}' from Palo Alto Inbound Inspection Rule '{$ruleName}'");
-                            $delPath = "{$xpath}/entry[@name='{$ruleName}']/type/ssl-inbound-inspection/certificates/member[text()='{$member}']";
-                            $delUrl = "https://{$host}/api/?type=config&action=delete&xpath=" . urlencode($delPath);
-                            $this->executeSet($delUrl, $key, $ruleName, $errors);
+                        if ((str_starts_with($member, $oldCertPrefix) || $member === $legacyName) && $member !== $newCertName) {
+                            $memberInfo = $this->getCert($automation, $member);
+                            if ($this->isCertExpired($member, $memberInfo)) {
+                                Log::info("Removing EXPIRED old certificate '{$member}' from Palo Alto Inbound Inspection Rule '{$ruleName}'");
+                                $delPath = "{$xpath}/entry[@name='{$ruleName}']/type/ssl-inbound-inspection/certificates/member[text()='{$member}']";
+                                $delUrl = "https://{$host}/api/?type=config&action=delete&xpath=" . urlencode($delPath);
+                                $this->executeSet($delUrl, $key, $ruleName, $errors);
+                            } else {
+                                Log::info("Retaining valid old certificate '{$member}' in Palo Alto Inbound Inspection Rule '{$ruleName}' for graceful overlap.");
+                            }
                         }
                     }
                 }
@@ -436,13 +443,19 @@ class PaloAltoService
     /**
      * Remove expired certificates for the given domain from the Palo Alto device.
      */
-    public function cleanupExpiredCerts(Automation $automation, string $domainName)
+    public function cleanupExpiredCerts(Automation $automation, string $domainName, ?string $excludeCertName = null)
     {
         $host = $automation->hostname;
         $key = $automation->getDecryptedPassword();
         
         $safeName = str_replace(['*', '.'], ['wildcard', '_'], $domainName);
         $prefix = "auto_{$safeName}_";
+        $legacyName = "auto_{$safeName}";
+
+        // Find the latest issued certificate for this domain in the database
+        $domain = $automation->domain ?? \App\Models\Domain::where('name', $domainName)->first();
+        $latestCert = $domain ? $domain->certificates()->where('status', 'issued')->latest('id')->first() : null;
+        $latestCertName = $latestCert ? "auto_{$safeName}_{$latestCert->id}" : null;
 
         $certs = $this->listCerts($automation);
         $deleted = 0;
@@ -450,7 +463,19 @@ class PaloAltoService
         foreach ($certs as $cert) {
             $name = $cert['name'];
             
-            if (str_starts_with($name, $prefix)) {
+            if (str_starts_with($name, $prefix) || $name === $legacyName) {
+                // NEVER delete the certificate currently being deployed
+                if ($excludeCertName && $name === $excludeCertName) {
+                    Log::info("Skipping Palo Alto certificate '{$name}' - currently being deployed.");
+                    continue;
+                }
+
+                // NEVER delete the latest issued certificate for the domain in the database
+                if ($latestCertName && $name === $latestCertName) {
+                    Log::info("Skipping Palo Alto certificate '{$name}' - latest issued certificate for this domain.");
+                    continue;
+                }
+
                 $fullInfo = $this->getCert($automation, $name);
                 
                 if ($this->isCertExpired($name, $fullInfo)) {
@@ -665,6 +690,7 @@ class PaloAltoService
 
         // Check Decryption Rules
         $oldCertPrefix = "auto_{$safeName}_";
+        $legacyName = "auto_{$safeName}";
         $xpath = "/config/devices/entry[@name='localhost.localdomain']/vsys/entry[@name='vsys1']/rulebase/decryption/rules";
         $url = "https://{$host}/api/?type=config&action=get&xpath=" . urlencode($xpath);
         $resp = Http::withoutVerifying()->withHeaders(['X-PAN-KEY' => $key])->get($url);
@@ -681,7 +707,7 @@ class PaloAltoService
                     if (isset($rule->type->{'ssl-forward-proxy'}->certificate)) {
                         $isForwardProxy = true;
                         $currentCertValue = (string)$rule->type->{'ssl-forward-proxy'}->certificate;
-                        if (str_starts_with($currentCertValue, $oldCertPrefix)) {
+                        if (str_starts_with($currentCertValue, $oldCertPrefix) || $currentCertValue === $legacyName) {
                             $isManaged = true;
                             $upToDate = ($currentCertValue === $certName);
                         }
@@ -690,7 +716,7 @@ class PaloAltoService
                         foreach ($rule->type->{'ssl-inbound-inspection'}->certificates->member as $member) {
                             $mName = (string)$member;
                             $members[] = $mName;
-                            if (str_starts_with($mName, $oldCertPrefix)) {
+                            if (str_starts_with($mName, $oldCertPrefix) || $mName === $legacyName) {
                                 $isManaged = true;
                             }
                             if ($mName === $certName) {

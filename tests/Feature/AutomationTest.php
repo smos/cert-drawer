@@ -379,4 +379,174 @@ LH6wYZxlExtMsrnyDq/FOpGCtOjCnCHxwJY8AY8P/IRAFkBqiEk7
                    ($request->data()['cert'] ?? '') === $certName;
         });
     }
+
+    public function test_palo_alto_lazy_removal_retains_unexpired_certificates_in_inbound_inspection_rules()
+    {
+        $domain = Domain::create(['name' => 'palotest.nl']);
+
+        $res = openssl_pkey_new(['private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA]);
+        openssl_pkey_export($res, $pkey);
+
+        // Expired older certificate
+        $certExpired = Certificate::create([
+            'domain_id' => $domain->id,
+            'status' => 'issued',
+            'request_type' => 'manual',
+            'certificate' => 'cert-expired',
+            'private_key' => encrypt($pkey),
+            'expiry_date' => now()->subDays(5),
+            'thumbprint_sha256' => 'thumb_expired',
+        ]);
+        $expiredCertName = "auto_palotest_nl_{$certExpired->id}";
+
+        // Valid, unexpired older certificate (e.g. from previous cycle, valid for 20 more days)
+        $certValid = Certificate::create([
+            'domain_id' => $domain->id,
+            'status' => 'issued',
+            'request_type' => 'manual',
+            'certificate' => 'cert-valid',
+            'private_key' => encrypt($pkey),
+            'expiry_date' => now()->addDays(20),
+            'thumbprint_sha256' => 'thumb_valid',
+        ]);
+        $validCertName = "auto_palotest_nl_{$certValid->id}";
+
+        // New certificate being deployed
+        $certNew = Certificate::create([
+            'domain_id' => $domain->id,
+            'status' => 'issued',
+            'request_type' => 'manual',
+            'certificate' => 'cert-new',
+            'private_key' => encrypt($pkey),
+            'expiry_date' => now()->addDays(90),
+            'thumbprint_sha256' => 'thumb_new',
+        ]);
+        $newCertName = "auto_palotest_nl_{$certNew->id}";
+
+        $automation = Automation::create([
+            'domain_id' => $domain->id,
+            'type' => 'paloalto',
+            'hostname' => 'pa.test.local',
+            'password' => 'test-pan-key',
+            'config' => [
+                'profiles_string' => '',
+            ],
+        ]);
+
+        \Illuminate\Support\Facades\Http::fake(function ($request) use ($expiredCertName, $validCertName, $newCertName) {
+            $url = urldecode($request->url());
+
+            // 1. Keypair import
+            if (str_contains($url, 'type=import') && str_contains($url, 'category=keypair')) {
+                return \Illuminate\Support\Facades\Http::response('<response status="success"><result><msg>Uploaded</msg></result></response>', 200);
+            }
+
+            // 2. Fetch decryption rules
+            if (str_contains($url, 'action=get') && str_contains($url, 'rulebase/decryption/rules')) {
+                $xml = <<<XML
+<response status="success">
+    <result>
+        <rules>
+            <entry name="Inbound-Rule-1">
+                <type>
+                    <ssl-inbound-inspection>
+                        <certificates>
+                            <member>{$expiredCertName}</member>
+                            <member>{$validCertName}</member>
+                        </certificates>
+                    </ssl-inbound-inspection>
+                </type>
+            </entry>
+        </rules>
+    </result>
+</response>
+XML;
+                return \Illuminate\Support\Facades\Http::response($xml, 200);
+            }
+
+            // 3. Get specific certificate info
+            if (str_contains($url, 'action=get') && str_contains($url, 'shared/certificate/entry')) {
+                return \Illuminate\Support\Facades\Http::response('<response status="success"><result><entry><not_valid_after>unknown</not_valid_after></entry></result></response>', 200);
+            }
+
+            // 4. List shared certificates
+            if (str_contains($url, 'action=get') && str_contains($url, 'shared/certificate')) {
+                $xml = <<<XML
+<response status="success">
+    <result>
+        <certificate>
+            <entry name="{$expiredCertName}"><common_name>palotest.nl</common_name><not_valid_after>Jan 01 2026</not_valid_after></entry>
+            <entry name="{$validCertName}"><common_name>palotest.nl</common_name><not_valid_after>Dec 31 2026</not_valid_after></entry>
+            <entry name="{$newCertName}"><common_name>palotest.nl</common_name><not_valid_after>Dec 31 2027</not_valid_after></entry>
+        </certificate>
+    </result>
+</response>
+XML;
+                return \Illuminate\Support\Facades\Http::response($xml, 200);
+            }
+
+            // 5. Rule updates / member sets
+            if (str_contains($url, 'action=set')) {
+                return \Illuminate\Support\Facades\Http::response('<response status="success"/>', 200);
+            }
+
+            // 6. Delete member or cert
+            if (str_contains($url, 'action=delete')) {
+                return \Illuminate\Support\Facades\Http::response('<response status="success"/>', 200);
+            }
+
+            // 7. Commit
+            if (str_contains($url, 'type=commit')) {
+                return \Illuminate\Support\Facades\Http::response('<response status="success"><result><msg>Commit succeeded</msg></result></response>', 200);
+            }
+
+            return \Illuminate\Support\Facades\Http::response('<response status="success"/>', 200);
+        });
+
+        $service = app(\App\Services\PaloAltoService::class);
+        $service->deploy($automation, $certNew);
+
+        // Assert that the NEW cert was added to the rule
+        \Illuminate\Support\Facades\Http::assertSent(function ($request) use ($newCertName) {
+            $decodedUrl = urldecode($request->url());
+            return str_contains($decodedUrl, 'action=set') &&
+                   str_contains($decodedUrl, 'ssl-inbound-inspection/certificates') &&
+                   str_contains($decodedUrl, "<member>{$newCertName}</member>");
+        });
+
+        // Assert that the EXPIRED cert was deleted from the rule
+        \Illuminate\Support\Facades\Http::assertSent(function ($request) use ($expiredCertName) {
+            $decodedUrl = urldecode($request->url());
+            return str_contains($decodedUrl, 'action=delete') &&
+                   str_contains($decodedUrl, "member[text()='{$expiredCertName}']");
+        });
+
+        // Assert that the VALID unexpired cert was NOT deleted from the rule (lazy removal allows overlap)
+        \Illuminate\Support\Facades\Http::assertNotSent(function ($request) use ($validCertName) {
+            $decodedUrl = urldecode($request->url());
+            return str_contains($decodedUrl, 'action=delete') &&
+                   str_contains($decodedUrl, "member[text()='{$validCertName}']");
+        });
+
+        // Assert that the EXPIRED cert was deleted from shared certs
+        \Illuminate\Support\Facades\Http::assertSent(function ($request) use ($expiredCertName) {
+            $decodedUrl = urldecode($request->url());
+            return str_contains($decodedUrl, 'action=delete') &&
+                   str_contains($decodedUrl, "entry[@name='{$expiredCertName}']");
+        });
+
+        // Assert that the VALID unexpired cert was NOT deleted from shared certs
+        \Illuminate\Support\Facades\Http::assertNotSent(function ($request) use ($validCertName) {
+            $decodedUrl = urldecode($request->url());
+            return str_contains($decodedUrl, 'action=delete') &&
+                   str_contains($decodedUrl, "entry[@name='{$validCertName}']");
+        });
+
+        // Assert that the NEW cert was NOT deleted from shared certs
+        \Illuminate\Support\Facades\Http::assertNotSent(function ($request) use ($newCertName) {
+            $decodedUrl = urldecode($request->url());
+            return str_contains($decodedUrl, 'action=delete') &&
+                   str_contains($decodedUrl, "entry[@name='{$newCertName}']");
+        });
+    }
 }

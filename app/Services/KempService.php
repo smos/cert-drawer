@@ -211,7 +211,7 @@ class KempService
 
         // Find the latest issued certificate for this domain in the database
         $domain = $automation->domain ?? \App\Models\Domain::where('name', $domainName)->first();
-        $latestCert = $domain ? $domain->certificates()->where('status', 'issued')->latest()->first() : null;
+        $latestCert = $domain ? $domain->certificates()->where('status', 'issued')->latest('id')->first() : null;
         $latestCertName = $latestCert ? "auto_{$safeName}_{$latestCert->id}" : null;
 
         // 1. Re-query all virtual services to ensure we NEVER delete a certificate that is actively bound!
