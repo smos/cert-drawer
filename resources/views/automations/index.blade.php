@@ -104,7 +104,11 @@
                                 echo !empty($roles) ? implode(', ', $roles) : 'None';
                             @endphp
                         @elseif($auto->type === 'paloalto')
-                            Profiles: {{ $auto->config['profiles_string'] ?? 'None' }}
+                            @if(!empty($auto->config['profiles_string']))
+                                Profiles: {{ $auto->config['profiles_string'] }}
+                            @else
+                                <span class="badge" style="background:#27ae60; color:white; padding: 2px 6px; border-radius: 4px; font-size: 0.85em;">Auto-discovery</span>
+                            @endif
                         @else
                             -
                         @endif
@@ -369,8 +373,11 @@
             pwdLabel.innerText = 'API Key';
             html = `
                 <div style="margin-bottom:15px">
-                    <label>SSL/TLS Service Profile Names (Optional, comma separated)</label><br>
-                    <input type="text" name="config[profiles_string]" placeholder="VPN-Profile,Portal-Profile" style="width:100%; padding:8px; border:1px solid #ddd;">
+                    <label>SSL/TLS Service Profile Names (Optional, auto-discovery enabled)</label><br>
+                    <input type="text" name="config[profiles_string]" placeholder="Optional: Leave blank for auto-discovery, or specify profiles" style="width:100%; padding:8px; border:1px solid #ddd;">
+                    <small style="color: #666; font-size: 0.85em; display:block; margin-top:4px;">
+                        Auto-discovers profiles & decryption rules referencing <code>auto_&lt;domain&gt;_*</code>. Specific profile names can be added optionally.
+                    </small>
                 </div>
             `;
         }

@@ -77,35 +77,47 @@ class PaloAltoService
             throw new Exception("Palo Alto API Error: " . $msg);
         }
 
-        Log::info("Successfully imported keypair {$certName} on Palo Alto at {$host}");
+        Log::info("Successfully imported keypair {$certName} on Palo Alto at {$host}. Committing certificate to store...");
 
+        // ========================================================
+        // PIECE 1: Commit the new certificate into the store
+        // ========================================================
+        // Committing the certificate first ensures that it is permanently registered
+        // in the PAN-OS active config before we link it to any profiles or policies.
+        $this->commit($automation);
+        Log::info("Certificate {$certName} committed successfully to Palo Alto configuration store.");
+
+        // ========================================================
+        // PIECE 2: Auto-detect & Link Profiles, Decryption Rules & Cleanup
+        // ========================================================
         $errors = [];
 
-        // 1. Update SSL/TLS Service Profiles
+        // 1. Auto-detect & Update SSL/TLS Service Profiles
         try {
-            $this->updateProfileReferences($automation, $certName);
+            $this->updateProfileReferences($automation, $certName, $certificate->domain->name);
         } catch (Exception $e) {
             $errors[] = "Profiles: " . $e->getMessage();
         }
 
-        // 2. Update Decryption Rules
+        // 2. Auto-detect & Update Decryption Rules
         try {
             $this->updateDecryptionRules($automation, $certName, $certificate->domain->name);
         } catch (Exception $e) {
             $errors[] = "Decryption Rules: " . $e->getMessage();
         }
 
-        // 3. Cleanup old/expired certificates for this domain
+        // 3. Cleanup old/expired certificates for this domain (skip commit here, final commit below)
         try {
-            $this->cleanupExpiredCerts($automation, $certificate->domain->name, $certName);
+            $this->cleanupExpiredCerts($automation, $certificate->domain->name, $certName, false);
         } catch (Exception $e) {
             // Cleanup failure is a warning, not a critical error
             Log::warning("Palo Alto Cleanup failed: " . $e->getMessage());
         }
 
-        // 4. Final Commit
+        // 4. Piece 2 Final Commit
         try {
             $this->commit($automation);
+            Log::info("Final commit completed successfully on Palo Alto for {$certName}.");
         } catch (Exception $e) {
             $errors[] = $e->getMessage();
         }
@@ -174,9 +186,9 @@ class PaloAltoService
 
         Log::info("Palo Alto Commit Job #{$jobId} enqueued. Polling for results...");
 
-        // Basic polling for results (up to 30s)
+        // Polling for results (up to 60s)
         $attempts = 0;
-        while ($attempts < 6) { // 6 * 5s = 30s
+        while ($attempts < 12) { // 12 * 5s = 60s
             sleep(5);
             $attempts++;
             
@@ -210,8 +222,6 @@ class PaloAltoService
 
                         if (!empty($warnings)) {
                             Log::warning("Palo Alto Commit Job #{$jobId} succeeded with warnings: " . implode('; ', $warnings));
-                            // We don't throw exception for warnings on success, but we log them.
-                            // To make them visible in Automation Log, we could append them to the status message.
                             session()->flash('automation_warnings', $warnings);
                         }
                         
@@ -221,59 +231,158 @@ class PaloAltoService
             }
         }
 
-        Log::info("Palo Alto Commit Job #{$jobId} is still running after 30s. Continuing...");
+        Log::info("Palo Alto Commit Job #{$jobId} is still running after 60s. Continuing...");
         return true;
     }
 
     /**
-     * Update SSL/TLS Service Profiles to use the new certificate.
+     * List all SSL/TLS service profiles from Shared and VSYS1.
+     * Returns an associative array keyed by profile name:
+     * [
+     *     'Profile-Name' => [
+     *         'name' => 'Profile-Name',
+     *         'location' => 'shared' | 'vsys1',
+     *         'certificate' => 'cert_name',
+     *         'xpath' => '...',
+     *         'cert_xpath' => '...',
+     *     ]
+     * ]
      */
-    protected function updateProfileReferences(Automation $automation, string $certName)
+    public function listProfiles(Automation $automation): array
     {
-        $profilesString = $automation->config['profiles_string'] ?? '';
-        if (empty($profilesString)) {
-            return;
+        $host = $automation->hostname;
+        $key = $automation->getDecryptedPassword();
+        $profiles = [];
+
+        $locations = [
+            'shared' => "/config/shared/ssl-tls-service-profile",
+            'vsys1' => "/config/devices/entry[@name='localhost.localdomain']/vsys/entry[@name='vsys1']/ssl-tls-service-profile",
+        ];
+
+        foreach ($locations as $locKey => $baseXpath) {
+            $url = "https://{$host}/api/?type=config&action=get&xpath=" . urlencode($baseXpath);
+            try {
+                $response = Http::withoutVerifying()
+                    ->withHeaders(['X-PAN-KEY' => $key])
+                    ->get($url);
+
+                if (!$response->successful()) {
+                    continue;
+                }
+
+                $xml = simplexml_load_string($response->body());
+                if (!$xml || (string)$xml['status'] !== 'success') {
+                    continue;
+                }
+
+                $entries = null;
+                if (isset($xml->result->{'ssl-tls-service-profile'}->entry)) {
+                    $entries = $xml->result->{'ssl-tls-service-profile'}->entry;
+                } elseif (isset($xml->result->entry)) {
+                    $entries = $xml->result->entry;
+                }
+
+                if ($entries) {
+                    foreach ($entries as $entry) {
+                        $pName = (string)$entry['name'];
+                        $cert = (string)($entry->certificate ?? '');
+                        $profiles[$pName] = [
+                            'name' => $pName,
+                            'location' => $locKey,
+                            'certificate' => $cert,
+                            'xpath' => "{$baseXpath}/entry[@name='{$pName}']",
+                            'cert_xpath' => "{$baseXpath}/entry[@name='{$pName}']/certificate",
+                        ];
+                    }
+                }
+            } catch (Exception $e) {
+                Log::warning("Failed to fetch Palo Alto SSL/TLS profiles from {$locKey}: " . $e->getMessage());
+            }
         }
 
-        $profiles = array_filter(array_map('trim', explode(',', $profilesString)));
-        if (empty($profiles)) {
-            return;
-        }
+        return $profiles;
+    }
 
+    /**
+     * Update SSL/TLS Service Profiles to use the new certificate.
+     * Auto-detects profiles referencing auto_<domain>_* as well as any explicit profiles.
+     */
+    protected function updateProfileReferences(Automation $automation, string $newCertName, string $domainName)
+    {
         $host = $automation->hostname;
         $key = $automation->getDecryptedPassword();
         $errors = [];
 
-        foreach ($profiles as $profileName) {
-            if (empty($profileName)) continue;
+        $safeName = str_replace(['*', '.'], ['wildcard', '_'], $domainName);
+        $oldCertPrefix = "auto_{$safeName}_";
+        $legacyName = "auto_{$safeName}";
+
+        $profilesString = $automation->config['profiles_string'] ?? '';
+        $explicitProfiles = array_filter(array_map('trim', explode(',', $profilesString)));
+
+        // 1. Auto-discover all profiles across Shared and VSYS1
+        $allProfiles = $this->listProfiles($automation);
+        $matchedProfiles = [];
+
+        foreach ($allProfiles as $pName => $profile) {
+            $currentCert = $profile['certificate'];
+            $isManaged = false;
+
+            // Auto-detect by naming pattern: auto_<domain>_* or legacy auto_<domain>
+            if (str_starts_with($currentCert, $oldCertPrefix) || $currentCert === $legacyName) {
+                $isManaged = true;
+            }
+
+            // Or if explicitly configured in profiles_string
+            if (in_array($pName, $explicitProfiles)) {
+                $isManaged = true;
+                $matchedProfiles[] = $pName;
+            }
+
+            if ($isManaged) {
+                if ($currentCert !== $newCertName) {
+                    Log::info("Updating Palo Alto SSL/TLS Profile '{$pName}' ({$profile['location']}) to use '{$newCertName}' (was '{$currentCert}')");
+                    $certXPath = $profile['cert_xpath'];
+                    $setUrl = "https://{$host}/api/?type=config&action=set&xpath=" . urlencode($certXPath) . "&element=" . urlencode("<certificate>{$newCertName}</certificate>");
+                    $this->executeSet($setUrl, $key, $pName, $errors);
+                } else {
+                    Log::info("Palo Alto SSL/TLS Profile '{$pName}' ({$profile['location']}) already uses '{$newCertName}'");
+                }
+            }
+        }
+
+        // 2. Fallback for any explicitly listed profiles not returned in listProfiles
+        $missingProfiles = array_diff($explicitProfiles, $matchedProfiles);
+        foreach ($missingProfiles as $pName) {
+            if (empty($pName)) continue;
 
             // Try SHARED first
-            $xpath = "/config/shared/ssl-tls-service-profile/entry[@name='{$profileName}']/certificate";
-            $url = "https://{$host}/api/?type=config&action=set&xpath=" . urlencode($xpath) . "&element=" . urlencode("<certificate>{$certName}</certificate>");
+            $xpath = "/config/shared/ssl-tls-service-profile/entry[@name='{$pName}']/certificate";
+            $url = "https://{$host}/api/?type=config&action=set&xpath=" . urlencode($xpath) . "&element=" . urlencode("<certificate>{$newCertName}</certificate>");
 
             $response = Http::withoutVerifying()->withHeaders(['X-PAN-KEY' => $key])->post($url);
             
             // If Shared fails with "Object not present" (code 7), try VSYS1
             $xml = simplexml_load_string($response->body());
             if ($xml && (string)$xml['code'] === '7') {
-                 Log::info("Profile {$profileName} not found in Shared. Trying VSYS1...");
-                 $vsysPath = "/config/devices/entry[@name='localhost.localdomain']/vsys/entry[@name='vsys1']/ssl-tls-service-profile/entry[@name='{$profileName}']/certificate";
-                 $vsysUrl = "https://{$host}/api/?type=config&action=set&xpath=" . urlencode($vsysPath) . "&element=" . urlencode("<certificate>{$certName}</certificate>");
+                 Log::info("Profile {$pName} not found in Shared. Trying VSYS1...");
+                 $vsysPath = "/config/devices/entry[@name='localhost.localdomain']/vsys/entry[@name='vsys1']/ssl-tls-service-profile/entry[@name='{$pName}']/certificate";
+                 $vsysUrl = "https://{$host}/api/?type=config&action=set&xpath=" . urlencode($vsysPath) . "&element=" . urlencode("<certificate>{$newCertName}</certificate>");
                  $response = Http::withoutVerifying()->withHeaders(['X-PAN-KEY' => $key])->post($vsysUrl);
             }
 
             if (!$response->successful()) {
-                $msg = "{$profileName} (HTTP {$response->status()})";
+                $msg = "{$pName} (HTTP {$response->status()})";
                 Log::error("Palo Alto Profile Update Failed: {$msg}");
                 $errors[] = $msg;
             } else {
                 $xml = simplexml_load_string($response->body());
                 if (!$xml || (string)$xml['status'] !== 'success') {
-                    $msg = "{$profileName} (" . ($xml ? (string)$xml->msg : "XML Error") . ")";
+                    $msg = "{$pName} (" . ($xml ? (string)$xml->msg : "XML Error") . ")";
                     Log::error("Palo Alto Profile Update API Error: {$msg}");
                     $errors[] = $msg;
                 } else {
-                    Log::info("Successfully updated Palo Alto Profile {$profileName} to use {$certName}");
+                    Log::info("Successfully updated Palo Alto Profile {$pName} to use {$newCertName}");
                 }
             }
         }
@@ -443,7 +552,7 @@ class PaloAltoService
     /**
      * Remove expired certificates for the given domain from the Palo Alto device.
      */
-    public function cleanupExpiredCerts(Automation $automation, string $domainName, ?string $excludeCertName = null)
+    public function cleanupExpiredCerts(Automation $automation, string $domainName, ?string $excludeCertName = null, bool $doCommit = true)
     {
         $host = $automation->hostname;
         $key = $automation->getDecryptedPassword();
@@ -458,6 +567,7 @@ class PaloAltoService
         $latestCertName = $latestCert ? "auto_{$safeName}_{$latestCert->id}" : null;
 
         $certs = $this->listCerts($automation);
+        $allProfiles = $this->listProfiles($automation);
         $deleted = 0;
 
         foreach ($certs as $cert) {
@@ -479,10 +589,22 @@ class PaloAltoService
                 $fullInfo = $this->getCert($automation, $name);
                 
                 if ($this->isCertExpired($name, $fullInfo)) {
+                    // Check if any SSL/TLS service profile is still actively referencing this certificate
+                    $activeProfiles = [];
+                    foreach ($allProfiles as $pName => $profile) {
+                        if ($profile['certificate'] === $name) {
+                            $activeProfiles[] = $pName;
+                        }
+                    }
+
+                    if (!empty($activeProfiles)) {
+                        Log::warning("Skipping deletion of expired Palo Alto certificate '{$name}' - still actively referenced by SSL/TLS profile(s): " . implode(', ', $activeProfiles));
+                        continue;
+                    }
+
                     Log::info("Cleaning up EXPIRED Palo Alto certificate: {$name}");
                     
-                    // 1. Explicitly remove references from known rulebases/profiles
-                    // This prevents "reference count not zero" errors
+                    // 1. Explicitly remove references from multi-cert decryption rulebases
                     try {
                         $this->removeCertificateReferences($automation, $name, $domainName);
                     } catch (Exception $e) {
@@ -514,7 +636,7 @@ class PaloAltoService
             }
         }
 
-        if ($deleted > 0) {
+        if ($deleted > 0 && $doCommit) {
             $this->commit($automation);
         }
 
@@ -522,7 +644,9 @@ class PaloAltoService
     }
 
     /**
-     * Specifically remove all references to a certificate from profiles and rules.
+     * Specifically remove references to an expired certificate from multi-cert decryption rules.
+     * Note: We NEVER strip certificates from SSL/TLS service profiles to prevent leaving
+     * firewall services (GlobalProtect VPN, etc.) without an SSL certificate.
      */
     protected function removeCertificateReferences(Automation $automation, string $certName, string $domainName)
     {
@@ -530,37 +654,7 @@ class PaloAltoService
         $key = $automation->getDecryptedPassword();
         $errors = [];
 
-        // 1. Check SSL/TLS Profiles
-        $profilesString = $automation->config['profiles_string'] ?? '';
-        if (!empty($profilesString)) {
-            $profiles = array_filter(array_map('trim', explode(',', $profilesString)));
-            foreach ($profiles as $profileName) {
-                // Try SHARED
-                $xpath = "/config/shared/ssl-tls-service-profile/entry[@name='{$profileName}']/certificate";
-                $urlGet = "https://{$host}/api/?type=config&action=get&xpath=" . urlencode($xpath);
-                $resp = Http::withoutVerifying()->withHeaders(['X-PAN-KEY' => $key])->get($urlGet);
-                
-                $xml = simplexml_load_string($resp->body());
-                if (!$resp->successful() || !$xml || (string)$xml['code'] === '7') {
-                    // Try VSYS1
-                    $xpath = "/config/devices/entry[@name='localhost.localdomain']/vsys/entry[@name='vsys1']/ssl-tls-service-profile/entry[@name='{$profileName}']/certificate";
-                    $urlGet = "https://{$host}/api/?type=config&action=get&xpath=" . urlencode($xpath);
-                    $resp = Http::withoutVerifying()->withHeaders(['X-PAN-KEY' => $key])->get($urlGet);
-                    $xml = simplexml_load_string($resp->body());
-                }
-
-                if ($resp->successful() && $xml) {
-                    $current = (string)($xml->result->certificate ?? $xml->result->entry->certificate ?? $xml->result->{'ssl-tls-service-profile'}->entry->certificate ?? '');
-                    if ($current === $certName) {
-                        Log::info("Unlinking expired cert {$certName} from Profile {$profileName} at {$xpath}");
-                        $urlDel = "https://{$host}/api/?type=config&action=delete&xpath=" . urlencode($xpath);
-                        Http::withoutVerifying()->withHeaders(['X-PAN-KEY' => $key])->post($urlDel);
-                    }
-                }
-            }
-        }
-
-        // 2. Check Decryption Rules
+        // Check Decryption Rules (remove member from Inbound Inspection)
         $xpathRules = "/config/devices/entry[@name='localhost.localdomain']/vsys/entry[@name='vsys1']/rulebase/decryption/rules";
         $urlRules = "https://{$host}/api/?type=config&action=get&xpath=" . urlencode($xpathRules);
         $respRules = Http::withoutVerifying()->withHeaders(['X-PAN-KEY' => $key])->get($urlRules);
@@ -571,17 +665,8 @@ class PaloAltoService
                 foreach ($xml->result->rules->entry as $rule) {
                     $ruleName = (string)$rule['name'];
                     
-                    // Handle SSL Forward Proxy
-                    if (isset($rule->type->{'ssl-forward-proxy'}->certificate)) {
-                        if ((string)$rule->type->{'ssl-forward-proxy'}->certificate === $certName) {
-                            Log::info("Removing expired cert {$certName} from Forward Proxy Rule '{$ruleName}'");
-                            $delPath = "{$xpathRules}/entry[@name='{$ruleName}']/type/ssl-forward-proxy/certificate";
-                            $delUrl = "https://{$host}/api/?type=config&action=delete&xpath=" . urlencode($delPath);
-                            $this->executeSet($delUrl, $key, $ruleName, $errors);
-                        }
-                    } 
                     // Handle SSL Inbound Inspection
-                    elseif (isset($rule->type->{'ssl-inbound-inspection'}->certificates->member)) {
+                    if (isset($rule->type->{'ssl-inbound-inspection'}->certificates->member)) {
                         foreach ($rule->type->{'ssl-inbound-inspection'}->certificates->member as $member) {
                             if ((string)$member === $certName) {
                                 Log::info("Removing expired cert {$certName} from Inbound Inspection Rule '{$ruleName}'");
@@ -651,46 +736,72 @@ class PaloAltoService
             }
         }
 
-        // Check Profiles
-        $profilesString = $automation->config['profiles_string'] ?? '';
-        if (!empty($profilesString)) {
-            $profiles = array_filter(array_map('trim', explode(',', $profilesString)));
-            foreach ($profiles as $p) {
-                // Try SHARED
-                $xpath = "/config/shared/ssl-tls-service-profile/entry[@name='{$p}']/certificate";
-                $url = "https://{$host}/api/?type=config&action=get&xpath=" . urlencode($xpath);
-                $resp = Http::withoutVerifying()->withHeaders(['X-PAN-KEY' => $key])->get($url);
-                
-                $xml = simplexml_load_string($resp->body());
-                if (!$resp->successful() || !$xml || (string)$xml['code'] === '7') {
-                    // Try VSYS1
-                    $vsysPath = "/config/devices/entry[@name='localhost.localdomain']/vsys/entry[@name='vsys1']/ssl-tls-service-profile/entry[@name='{$p}']/certificate";
-                    $vsysUrl = "https://{$host}/api/?type=config&action=get&xpath=" . urlencode($vsysPath);
-                    $resp = Http::withoutVerifying()->withHeaders(['X-PAN-KEY' => $key])->get($vsysUrl);
-                    $xml = simplexml_load_string($resp->body());
-                }
+        // Check Profiles (Auto-discovery across Shared and VSYS1, plus explicit list)
+        $oldCertPrefix = "auto_{$safeName}_";
+        $legacyName = "auto_{$safeName}";
 
-                $current = 'unknown';
-                if ($resp->successful() && $xml && (string)$xml['status'] === 'success') {
-                    // The certificate element can be at different levels depending on API version/response structure
-                    if (isset($xml->result->{'ssl-tls-service-profile'}->entry->certificate)) {
-                        $current = (string)$xml->result->{'ssl-tls-service-profile'}->entry->certificate;
-                    } elseif (isset($xml->result->entry->certificate)) {
-                        $current = (string)$xml->result->entry->certificate;
-                    } elseif (isset($xml->result->certificate)) {
-                        $current = (string)$xml->result->certificate;
-                    }
-                }
+        $allProfiles = $this->listProfiles($automation);
+        $profilesString = $automation->config['profiles_string'] ?? '';
+        $explicitProfiles = array_filter(array_map('trim', explode(',', $profilesString)));
+        $checkedProfiles = [];
+
+        foreach ($allProfiles as $p => $profile) {
+            $currentCert = $profile['certificate'];
+            $isManaged = (str_starts_with($currentCert, $oldCertPrefix) || $currentCert === $legacyName || in_array($p, $explicitProfiles));
+
+            if ($isManaged) {
+                $checkedProfiles[$p] = true;
+                $isUpToDate = ($currentCert === $certName);
                 $status['details']['profiles'][$p] = [
-                    'current_value' => $current,
-                    'up_to_date' => $current === $certName
+                    'current_value' => $currentCert ?: 'none',
+                    'up_to_date' => $isUpToDate,
+                    'location' => $profile['location']
                 ];
+                if (!$isUpToDate) {
+                    $status['needs_update'] = true;
+                }
+            }
+        }
+
+        // Fallback for explicit profiles not found in listProfiles
+        foreach ($explicitProfiles as $p) {
+            if (isset($checkedProfiles[$p])) continue;
+
+            // Try SHARED
+            $xpath = "/config/shared/ssl-tls-service-profile/entry[@name='{$p}']/certificate";
+            $url = "https://{$host}/api/?type=config&action=get&xpath=" . urlencode($xpath);
+            $resp = Http::withoutVerifying()->withHeaders(['X-PAN-KEY' => $key])->get($url);
+            
+            $xml = simplexml_load_string($resp->body());
+            if (!$resp->successful() || !$xml || (string)$xml['code'] === '7') {
+                // Try VSYS1
+                $vsysPath = "/config/devices/entry[@name='localhost.localdomain']/vsys/entry[@name='vsys1']/ssl-tls-service-profile/entry[@name='{$p}']/certificate";
+                $vsysUrl = "https://{$host}/api/?type=config&action=get&xpath=" . urlencode($vsysPath);
+                $resp = Http::withoutVerifying()->withHeaders(['X-PAN-KEY' => $key])->get($vsysUrl);
+                $xml = simplexml_load_string($resp->body());
+            }
+
+            $current = 'unknown';
+            if ($resp->successful() && $xml && (string)$xml['status'] === 'success') {
+                if (isset($xml->result->{'ssl-tls-service-profile'}->entry->certificate)) {
+                    $current = (string)$xml->result->{'ssl-tls-service-profile'}->entry->certificate;
+                } elseif (isset($xml->result->entry->certificate)) {
+                    $current = (string)$xml->result->entry->certificate;
+                } elseif (isset($xml->result->certificate)) {
+                    $current = (string)$xml->result->certificate;
+                }
+            }
+            $isUpToDate = ($current === $certName);
+            $status['details']['profiles'][$p] = [
+                'current_value' => $current,
+                'up_to_date' => $isUpToDate
+            ];
+            if (!$isUpToDate) {
+                $status['needs_update'] = true;
             }
         }
 
         // Check Decryption Rules
-        $oldCertPrefix = "auto_{$safeName}_";
-        $legacyName = "auto_{$safeName}";
         $xpath = "/config/devices/entry[@name='localhost.localdomain']/vsys/entry[@name='vsys1']/rulebase/decryption/rules";
         $url = "https://{$host}/api/?type=config&action=get&xpath=" . urlencode($xpath);
         $resp = Http::withoutVerifying()->withHeaders(['X-PAN-KEY' => $key])->get($url);
@@ -731,9 +842,16 @@ class PaloAltoService
                             'current_value' => $currentCertValue,
                             'up_to_date' => $upToDate
                         ];
+                        if (!$upToDate) {
+                            $status['needs_update'] = true;
+                        }
                     }
                 }
             }
+        }
+
+        if ($existing && $status['needs_update']) {
+            $status['message'] = "Certificate '{$certName}' exists on device, but 1 or more profiles/rules need updating.";
         }
 
         return $status;

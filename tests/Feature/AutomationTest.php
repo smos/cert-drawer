@@ -548,5 +548,260 @@ XML;
             return str_contains($decodedUrl, 'action=delete') &&
                    str_contains($decodedUrl, "entry[@name='{$newCertName}']");
         });
+
+        // Assert that commit was called twice (Piece 1 after cert import, Piece 2 after profile & rule updates)
+        $commitCount = collect(\Illuminate\Support\Facades\Http::recorded())
+            ->filter(fn($pair) => str_contains(urldecode($pair[0]->url()), 'type=commit'))
+            ->count();
+        $this->assertEquals(2, $commitCount);
+    }
+
+    public function test_palo_alto_auto_detects_and_updates_ssl_tls_service_profiles()
+    {
+        $domain = Domain::create(['name' => 'paloprofile.nl']);
+
+        $res = openssl_pkey_new(['private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA]);
+        openssl_pkey_export($res, $pkey);
+
+        $oldCert = Certificate::create([
+            'domain_id' => $domain->id,
+            'status' => 'issued',
+            'request_type' => 'manual',
+            'certificate' => 'cert-old',
+            'private_key' => encrypt($pkey),
+            'expiry_date' => now()->subDays(10), // expired
+            'thumbprint_sha256' => 'thumb_old',
+        ]);
+        $oldCertName = "auto_paloprofile_nl_{$oldCert->id}";
+
+        $newCert = Certificate::create([
+            'domain_id' => $domain->id,
+            'status' => 'issued',
+            'request_type' => 'manual',
+            'certificate' => 'cert-new',
+            'private_key' => encrypt($pkey),
+            'expiry_date' => now()->addDays(90),
+            'thumbprint_sha256' => 'thumb_new',
+        ]);
+        $newCertName = "auto_paloprofile_nl_{$newCert->id}";
+
+        // Automation has NO profiles_string configured - relying entirely on auto-discovery!
+        $automation = Automation::create([
+            'domain_id' => $domain->id,
+            'type' => 'paloalto',
+            'hostname' => 'pa.test.local',
+            'password' => 'test-pan-key',
+            'config' => [
+                'profiles_string' => '',
+            ],
+        ]);
+
+        \Illuminate\Support\Facades\Http::fake(function ($request) use ($oldCertName, $newCertName) {
+            $url = urldecode($request->url());
+
+            // 1. Keypair import
+            if (str_contains($url, 'type=import') && str_contains($url, 'category=keypair')) {
+                return \Illuminate\Support\Facades\Http::response('<response status="success"><result><msg>Uploaded</msg></result></response>', 200);
+            }
+
+            // 2. Commit
+            if (str_contains($url, 'type=commit')) {
+                return \Illuminate\Support\Facades\Http::response('<response status="success"><result><msg>Commit succeeded</msg></result></response>', 200);
+            }
+
+            // 3. Shared SSL/TLS Service Profiles
+            if (str_contains($url, 'action=get') && str_contains($url, '/config/shared/ssl-tls-service-profile')) {
+                $xml = <<<XML
+<response status="success">
+    <result>
+        <ssl-tls-service-profile>
+            <entry name="Shared-VPN-Profile">
+                <certificate>{$oldCertName}</certificate>
+            </entry>
+        </ssl-tls-service-profile>
+    </result>
+</response>
+XML;
+                return \Illuminate\Support\Facades\Http::response($xml, 200);
+            }
+
+            // 4. VSYS1 SSL/TLS Service Profiles
+            if (str_contains($url, 'action=get') && str_contains($url, '/vsys/entry[@name=\'vsys1\']/ssl-tls-service-profile')) {
+                $xml = <<<XML
+<response status="success">
+    <result>
+        <ssl-tls-service-profile>
+            <entry name="VSYS1-Portal-Profile">
+                <certificate>{$oldCertName}</certificate>
+            </entry>
+            <entry name="Unrelated-Profile">
+                <certificate>other_domain_cert</certificate>
+            </entry>
+        </ssl-tls-service-profile>
+    </result>
+</response>
+XML;
+                return \Illuminate\Support\Facades\Http::response($xml, 200);
+            }
+
+            // 5. Decryption rules
+            if (str_contains($url, 'action=get') && str_contains($url, 'rulebase/decryption/rules')) {
+                return \Illuminate\Support\Facades\Http::response('<response status="success"><result><rules/></result></response>', 200);
+            }
+
+            // 6. List shared certs
+            if (str_contains($url, 'action=get') && str_contains($url, '/config/shared/certificate')) {
+                $xml = <<<XML
+<response status="success">
+    <result>
+        <certificate>
+            <entry name="{$oldCertName}"><common_name>paloprofile.nl</common_name><not_valid_after>Jan 01 2026</not_valid_after></entry>
+            <entry name="{$newCertName}"><common_name>paloprofile.nl</common_name><not_valid_after>Dec 31 2027</not_valid_after></entry>
+        </certificate>
+    </result>
+</response>
+XML;
+                return \Illuminate\Support\Facades\Http::response($xml, 200);
+            }
+
+            // 7. Profile sets & deletes
+            if (str_contains($url, 'action=set') || str_contains($url, 'action=delete')) {
+                return \Illuminate\Support\Facades\Http::response('<response status="success"/>', 200);
+            }
+
+            return \Illuminate\Support\Facades\Http::response('<response status="success"/>', 200);
+        });
+
+        $service = app(\App\Services\PaloAltoService::class);
+
+        // 1. Verify checkStatus auto-discovers profiles
+        $status = $service->checkStatus($automation, $newCert);
+        $this->assertTrue($status['needs_update']);
+        $this->assertArrayHasKey('Shared-VPN-Profile', $status['details']['profiles']);
+        $this->assertArrayHasKey('VSYS1-Portal-Profile', $status['details']['profiles']);
+        $this->assertArrayNotHasKey('Unrelated-Profile', $status['details']['profiles']);
+        $this->assertFalse($status['details']['profiles']['Shared-VPN-Profile']['up_to_date']);
+        $this->assertFalse($status['details']['profiles']['VSYS1-Portal-Profile']['up_to_date']);
+
+        // 2. Deploy: auto-discovers and replaces both profiles
+        $service->deploy($automation, $newCert);
+
+        // Assert Shared-VPN-Profile was updated to new cert
+        \Illuminate\Support\Facades\Http::assertSent(function ($request) use ($newCertName) {
+            $decodedUrl = urldecode($request->url());
+            return str_contains($decodedUrl, 'action=set') &&
+                   str_contains($decodedUrl, "ssl-tls-service-profile/entry[@name='Shared-VPN-Profile']/certificate") &&
+                   str_contains($decodedUrl, "<certificate>{$newCertName}</certificate>");
+        });
+
+        // Assert VSYS1-Portal-Profile was updated to new cert
+        \Illuminate\Support\Facades\Http::assertSent(function ($request) use ($newCertName) {
+            $decodedUrl = urldecode($request->url());
+            return str_contains($decodedUrl, 'action=set') &&
+                   str_contains($decodedUrl, "ssl-tls-service-profile/entry[@name='VSYS1-Portal-Profile']/certificate") &&
+                   str_contains($decodedUrl, "<certificate>{$newCertName}</certificate>");
+        });
+
+        // Assert Unrelated-Profile was NOT updated
+        \Illuminate\Support\Facades\Http::assertNotSent(function ($request) {
+            $decodedUrl = urldecode($request->url());
+            return str_contains($decodedUrl, 'Unrelated-Profile');
+        });
+
+        // Assert that commit was called twice (Piece 1 and Piece 2)
+        $commitCount = collect(\Illuminate\Support\Facades\Http::recorded())
+            ->filter(fn($pair) => str_contains(urldecode($pair[0]->url()), 'type=commit'))
+            ->count();
+        $this->assertEquals(2, $commitCount);
+    }
+
+    public function test_palo_alto_cleanup_skips_deleting_expired_certificate_if_still_referenced_by_profile()
+    {
+        $domain = Domain::create(['name' => 'safeguard.nl']);
+
+        $res = openssl_pkey_new(['private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA]);
+        openssl_pkey_export($res, $pkey);
+
+        $expiredCert = Certificate::create([
+            'domain_id' => $domain->id,
+            'status' => 'issued',
+            'request_type' => 'manual',
+            'certificate' => 'cert-expired',
+            'private_key' => encrypt($pkey),
+            'expiry_date' => now()->subDays(10), // expired
+            'thumbprint_sha256' => 'thumb_exp',
+        ]);
+        $expiredCertName = "auto_safeguard_nl_{$expiredCert->id}";
+
+        $automation = Automation::create([
+            'domain_id' => $domain->id,
+            'type' => 'paloalto',
+            'hostname' => 'pa.test.local',
+            'password' => 'test-pan-key',
+            'config' => [
+                'profiles_string' => '',
+            ],
+        ]);
+
+        \Illuminate\Support\Facades\Http::fake(function ($request) use ($expiredCertName) {
+            $url = urldecode($request->url());
+
+            // List shared certs
+            if (str_contains($url, 'action=get') && str_contains($url, '/config/shared/certificate')) {
+                $xml = <<<XML
+<response status="success">
+    <result>
+        <certificate>
+            <entry name="{$expiredCertName}"><common_name>safeguard.nl</common_name><not_valid_after>Jan 01 2026</not_valid_after></entry>
+        </certificate>
+    </result>
+</response>
+XML;
+                return \Illuminate\Support\Facades\Http::response($xml, 200);
+            }
+
+            // Shared profiles: GlobalProtect365 is STILL referencing the expired cert
+            if (str_contains($url, 'action=get') && str_contains($url, '/config/shared/ssl-tls-service-profile')) {
+                $xml = <<<XML
+<response status="success">
+    <result>
+        <ssl-tls-service-profile>
+            <entry name="GlobalProtect365">
+                <certificate>{$expiredCertName}</certificate>
+            </entry>
+        </ssl-tls-service-profile>
+    </result>
+</response>
+XML;
+                return \Illuminate\Support\Facades\Http::response($xml, 200);
+            }
+
+            // VSYS1 profiles
+            if (str_contains($url, 'action=get') && str_contains($url, 'ssl-tls-service-profile')) {
+                return \Illuminate\Support\Facades\Http::response('<response status="success"><result/></response>', 200);
+            }
+
+            return \Illuminate\Support\Facades\Http::response('<response status="success"/>', 200);
+        });
+
+        $service = app(\App\Services\PaloAltoService::class);
+        $deleted = $service->cleanupExpiredCerts($automation, 'safeguard.nl');
+
+        // Assert 0 deleted because it is still actively referenced by GlobalProtect365
+        $this->assertEquals(0, $deleted);
+
+        // Assert no delete request was sent to strip the certificate from GlobalProtect365
+        \Illuminate\Support\Facades\Http::assertNotSent(function ($request) {
+            $decodedUrl = urldecode($request->url());
+            return str_contains($decodedUrl, 'action=delete') &&
+                   str_contains($decodedUrl, 'GlobalProtect365');
+        });
+
+        // Assert no delete request was sent to delete the certificate object
+        \Illuminate\Support\Facades\Http::assertNotSent(function ($request) use ($expiredCertName) {
+            $decodedUrl = urldecode($request->url());
+            return str_contains($decodedUrl, 'action=delete') &&
+                   str_contains($decodedUrl, "entry[@name='{$expiredCertName}']");
+        });
     }
 }
